@@ -9,6 +9,16 @@ const headers = {
   "Content-Type": "application/json",
 };
 
+export interface AirtableAttachment {
+  id: string;
+  url: string;
+  filename: string;
+  size: number;
+  type: string;
+  width?: number;
+  height?: number;
+}
+
 export interface SessionRecord {
   id: string;
   datum: string;
@@ -22,6 +32,7 @@ export interface SessionRecord {
   routinen: string | null;
   affirmationen: string | null;
   exportSelection: string[];
+  anhänge: AirtableAttachment[] | null;
 }
 
 async function resolveSpielerName(recordId: string): Promise<string> {
@@ -74,6 +85,7 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
     affirmationen:
       (f["Affirmationen (from Spieler)"] as string[] | undefined)?.[0] ?? null,
     exportSelection: (f["Export Selection"] as string[] | undefined) ?? [],
+    anhänge: (f["Anhänge"] as AirtableAttachment[] | undefined) ?? null,
   };
 }
 

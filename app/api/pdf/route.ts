@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyDownloadToken } from '@/lib/token';
 import { fetchSession } from '@/lib/airtable';
-import { generatePdfBuffer } from '@/lib/pdf-template';
+import { generatePdfBuffer, type AttachmentImage } from '@/lib/pdf-template';
 import path from 'path';
 import fs from 'fs';
 
@@ -34,9 +34,29 @@ export async function GET(req: NextRequest) {
   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
   const logoDataUrl = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
 
+  const shouldFetchImages =
+    session.exportSelection.length === 0 || session.exportSelection.includes('Anhänge');
+
+  const attachmentImages: AttachmentImage[] = shouldFetchImages && session.anhänge?.length
+    ? (await Promise.all(
+        session.anhänge
+          .filter((att) => att.type.startsWith('image/'))
+          .map(async (att) => {
+            try {
+              const res = await fetch(att.url);
+              if (!res.ok) return null;
+              const buf = Buffer.from(await res.arrayBuffer());
+              return { dataUrl: `data:${att.type};base64,${buf.toString('base64')}`, filename: att.filename };
+            } catch {
+              return null;
+            }
+          })
+      )).filter((r): r is AttachmentImage => r !== null)
+    : [];
+
   let pdfArrayBuffer: ArrayBuffer;
   try {
-    const buf = await generatePdfBuffer(session, logoDataUrl);
+    const buf = await generatePdfBuffer(session, logoDataUrl, attachmentImages);
     pdfArrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
   } catch (err) {
     console.error('PDF generation error:', err instanceof Error ? err.stack : err);

@@ -1,5 +1,10 @@
 import type { SessionRecord } from './airtable';
 
+export interface AttachmentImage {
+  dataUrl: string;
+  filename: string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfmakePrinter = require('pdfmake');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -98,9 +103,62 @@ function buildSection(title: string, text: string | null, asList = false): any[]
   ];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildAttachmentsSection(images: AttachmentImage[]): any[] {
+  if (images.length === 0) return [];
+
+  // Two images per row, fit within available column width
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = [];
+  for (let i = 0; i < images.length; i += 2) {
+    const left = images[i];
+    const right = images[i + 1];
+    rows.push({
+      columns: [
+        {
+          stack: [
+            { image: left.dataUrl, fit: [231, 200], margin: [0, 0, 0, 4] },
+            { text: left.filename, fontSize: 7.5, color: GRAY },
+          ],
+        },
+        right
+          ? {
+              stack: [
+                { image: right.dataUrl, fit: [231, 200], margin: [0, 0, 0, 4] },
+                { text: right.filename, fontSize: 7.5, color: GRAY },
+              ],
+            }
+          : { text: '' },
+      ],
+      columnGap: 12,
+      margin: [0, 0, 0, 12],
+    });
+  }
+
+  return [
+    {
+      stack: [
+        {
+          columns: [
+            {
+              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 12, r: 1.5, color: FL_GREEN }],
+              width: 11,
+            },
+            { text: 'ANHÄNGE', fontSize: 9, bold: true, color: FL_GREEN },
+          ],
+          margin: [0, 0, 0, 8],
+        },
+        ...rows,
+      ],
+      margin: [0, 0, 0, 18],
+    },
+  ];
+}
+
 export async function generatePdfBuffer(
   session: SessionRecord,
-  logoDataUrl: string
+  logoDataUrl: string,
+  attachmentImages: AttachmentImage[] = []
 ): Promise<Buffer> {
   const sessionDate = formatDate(session.datum);
   const sel = session.exportSelection;
@@ -109,6 +167,7 @@ export async function generatePdfBuffer(
   const showToDos = showAll || sel.includes('To-Dos');
   const showRoutinen = showAll || sel.includes('Routinen');
   const showAffirmationen = showAll || sel.includes('Affirmation');
+  const showAnhänge = showAll || sel.includes('Anhänge');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sections: any[] = [
@@ -116,6 +175,7 @@ export async function generatePdfBuffer(
     ...(showToDos ? buildSection('TO-DOS', session.toDos, true) : []),
     ...(showRoutinen ? buildSection('ROUTINEN', session.routinen, true) : []),
     ...(showAffirmationen ? buildSection('AFFIRMATIONEN', session.affirmationen, true) : []),
+    ...(showAnhänge ? buildAttachmentsSection(attachmentImages) : []),
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
