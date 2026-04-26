@@ -34,9 +34,10 @@ export async function GET(req: NextRequest) {
   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
   const logoDataUrl = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
 
-  let pdfBuffer: Buffer;
+  let pdfArrayBuffer: ArrayBuffer;
   try {
-    pdfBuffer = await generatePdfBuffer(session, logoDataUrl);
+    const buf = await generatePdfBuffer(session, logoDataUrl);
+    pdfArrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
   } catch (err) {
     console.error('PDF generation error:', err instanceof Error ? err.stack : err);
     return new NextResponse('PDF-Generierung fehlgeschlagen', { status: 500 });
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
   const dateSlug = session.datum.replace(/\//g, '-');
   const filename = `FL-Session-${playerSlug}-${dateSlug}.pdf`;
 
-  return new NextResponse(pdfBuffer, {
+  return new NextResponse(pdfArrayBuffer, {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
