@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyDownloadToken } from "@/lib/token";
 import { fetchSession } from "@/lib/airtable";
 import { SessionPDF } from "@/lib/pdf-template";
-import { renderToBuffer } from "@react-pdf/renderer";
+import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import React from "react";
 
 export const runtime = "nodejs";
@@ -38,11 +38,19 @@ export async function GET(req: NextRequest) {
   const logoUrl = `${appUrl}/logo.png`;
 
   // Generate PDF
-  let pdfBuffer: Buffer;
+  let pdfArrayBuffer: ArrayBuffer;
   try {
-    pdfBuffer = await renderToBuffer(
-      React.createElement(SessionPDF, { session, logoUrl })
+    const buf = await renderToBuffer(
+      React.createElement(SessionPDF, {
+        session,
+        logoUrl,
+      }) as React.ReactElement<DocumentProps>
     );
+    // Convert Node Buffer → ArrayBuffer (valid BodyInit in all environments)
+    pdfArrayBuffer = buf.buffer.slice(
+      buf.byteOffset,
+      buf.byteOffset + buf.byteLength
+    ) as ArrayBuffer;
   } catch (err) {
     console.error("PDF generation error:", err);
     return new NextResponse("PDF-Generierung fehlgeschlagen", { status: 500 });
@@ -52,7 +60,7 @@ export async function GET(req: NextRequest) {
   const dateSlug = session.datum.replace(/\//g, "-");
   const filename = `FL-Session-${playerSlug}-${dateSlug}.pdf`;
 
-  return new NextResponse(pdfBuffer, {
+  return new NextResponse(pdfArrayBuffer, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
