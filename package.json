@@ -11,6 +11,7 @@
     "@react-pdf/renderer": "^3.4.4",
     "jose": "^5.9.6",
     "next": "^15.3.1",
+    "pdfmake": "^0.3.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -18,6 +19,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

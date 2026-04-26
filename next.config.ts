@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // @react-pdf/renderer needs canvas — mark as external for server builds
+  serverExternalPackages: ["pdfmake", "pdfkit"],
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals = [...(config.externals || []), "canvas"];

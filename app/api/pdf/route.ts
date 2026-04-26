@@ -1,16 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { verifyDownloadToken } from "@/lib/token";
-import { fetchSession } from "@/lib/airtable";
-import { SessionPDF } from "@/lib/pdf-template";
-import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
-import React from "react";
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyDownloadToken } from '@/lib/token';
+import { fetchSession } from '@/lib/airtable';
+import { generatePdfBuffer } from '@/lib/pdf-template';
+import path from 'path';
+import fs from 'fs';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const token = req.nextUrl.searchParams.get("token");
+  const token = req.nextUrl.searchParams.get('token');
   if (!token) {
-    return new NextResponse("Missing token", { status: 400 });
+    return new NextResponse('Missing token', { status: 400 });
   }
 
   let recordId: string;
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     ({ recordId } = await verifyDownloadToken(token));
   } catch {
     return new NextResponse(
-      "Link abgelaufen oder ungültig. Bitte neues PDF in Airtable generieren.",
+      'Link abgelaufen oder ungültig. Bitte neues PDF in Airtable generieren.',
       { status: 410 }
     );
   }
@@ -27,40 +27,31 @@ export async function GET(req: NextRequest) {
   try {
     session = await fetchSession(recordId);
   } catch (err) {
-    console.error("Airtable fetch error:", err);
-    return new NextResponse("Session nicht gefunden", { status: 404 });
+    console.error('Airtable fetch error:', err);
+    return new NextResponse('Session nicht gefunden', { status: 404 });
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  const logoUrl = `${appUrl}/logo.png`;
+  const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+  const logoDataUrl = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
 
-  let pdfArrayBuffer: ArrayBuffer;
+  let pdfBuffer: Buffer;
   try {
-    const buf = await renderToBuffer(
-      React.createElement(SessionPDF, {
-        session,
-        logoUrl,
-      }) as React.ReactElement<DocumentProps>
-    );
-    pdfArrayBuffer = buf.buffer.slice(
-      buf.byteOffset,
-      buf.byteOffset + buf.byteLength
-    ) as ArrayBuffer;
+    pdfBuffer = await generatePdfBuffer(session, logoDataUrl);
   } catch (err) {
-    console.error("PDF generation error:", err);
-    return new NextResponse("PDF-Generierung fehlgeschlagen", { status: 500 });
+    console.error('PDF generation error:', err instanceof Error ? err.stack : err);
+    return new NextResponse('PDF-Generierung fehlgeschlagen', { status: 500 });
   }
 
-  const playerSlug = session.spielerName.replace(/\s+/g, "-");
-  const dateSlug = session.datum.replace(/\//g, "-");
+  const playerSlug = session.spielerName.replace(/\s+/g, '-');
+  const dateSlug = session.datum.replace(/\//g, '-');
   const filename = `FL-Session-${playerSlug}-${dateSlug}.pdf`;
 
-  return new NextResponse(pdfArrayBuffer, {
+  return new NextResponse(pdfBuffer, {
     status: 200,
     headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
     },
   });
 }
