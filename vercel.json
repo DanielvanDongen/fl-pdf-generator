@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "functions": {
+    "app/api/webhook/route.ts": { "maxDuration": 30 },
+    "app/api/pdf/route.ts": { "maxDuration": 30 }
+  }
+}
