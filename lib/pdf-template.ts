@@ -48,13 +48,19 @@ function buildSection(title: string, text: string | null, asList = false): any[]
           { text: line, fontSize: 10, color: DARK },
         ],
         margin: [0, 0, 0, 5],
+        unbreakable: true,
       }))
     : lines.map(line => ({
         text: line,
         fontSize: 10,
         color: DARK,
         margin: [0, 0, 0, 2],
+        unbreakable: true,
       }));
+
+  // Sections with ≤ 15 lines are guaranteed to fit on one page: keep them together.
+  // Larger sections (e.g. long Affirmationen) must flow — unbreakable: true would drop them.
+  const blockFitsOnePage = lines.length <= 15;
 
   return [
     {
@@ -86,8 +92,7 @@ function buildSection(title: string, text: string | null, asList = false): any[]
           },
         },
       ],
-      // No unbreakable: true — allows long sections (Affirmationen, Routinen) to flow
-      // across multiple pages instead of being silently dropped by pdfmake.
+      unbreakable: blockFitsOnePage,
       margin: [0, 0, 0, 18],
     },
   ];
