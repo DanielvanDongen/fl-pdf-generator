@@ -98,10 +98,11 @@ export async function generatePdfBuffer(
 ): Promise<Buffer> {
   const sessionDate = formatDate(session.datum);
   const sel = session.exportSelection;
-  const showNotizen = sel.includes('Notiz') || sel.length === 0;
-  const showToDos = sel.includes('To-Dos');
-  const showRoutinen = sel.includes('Routinen');
-  const showAffirmationen = sel.includes('Affirmation');
+  const showAll = sel.length === 0;
+  const showNotizen = showAll || sel.includes('Notiz');
+  const showToDos = showAll || sel.includes('To-Dos');
+  const showRoutinen = showAll || sel.includes('Routinen');
+  const showAffirmationen = showAll || sel.includes('Affirmation');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sections: any[] = [
