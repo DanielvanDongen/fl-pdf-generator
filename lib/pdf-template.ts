@@ -78,6 +78,7 @@ function buildSection(title: string, text: string | null, asList = false): any[]
           },
         },
       ],
+      unbreakable: true,
       margin: [0, 0, 0, 18],
     },
   ];

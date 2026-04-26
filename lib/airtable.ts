@@ -1,6 +1,8 @@
 const BASE_ID = process.env.AIRTABLE_BASE_ID!;
 const TOKEN = process.env.AIRTABLE_TOKEN!;
 const TABLE_ID = "tblywrEl1cQbHNzrz"; // 1:1 Sessions
+const SPIELER_TABLE = "tblVoY7jSljHw8Dkf";
+const COACHES_TABLE = "tbljesKXbMA0Pqa8H";
 
 const headers = {
   Authorization: `Bearer ${TOKEN}`,
@@ -22,6 +24,22 @@ export interface SessionRecord {
   exportSelection: string[];
 }
 
+async function resolveSpielerName(recordId: string): Promise<string> {
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${SPIELER_TABLE}/${recordId}?fields[]=Vorname&fields[]=Nachname`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) return "–";
+  const { fields } = await res.json();
+  return [fields["Vorname"], fields["Nachname"]].filter(Boolean).join(" ") || "–";
+}
+
+async function resolveCoachName(recordId: string): Promise<string> {
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${COACHES_TABLE}/${recordId}?fields[]=${encodeURIComponent("Coach Name")}`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) return "–";
+  const { fields } = await res.json();
+  return fields["Coach Name"] ?? "–";
+}
+
 export async function fetchSession(recordId: string): Promise<SessionRecord> {
   const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`;
   const res = await fetch(url, { headers });
@@ -33,15 +51,20 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
   const data = await res.json();
   const f = data.fields;
 
-  const spielerRaw = f["Spieler"] as string[] | undefined;
-  const coachRaw = f["Coach"] as string[] | undefined;
+  const spielerRecordId = (f["Spieler"] as string[] | undefined)?.[0] ?? null;
+  const coachRecordId = (f["Coach"] as string[] | undefined)?.[0] ?? null;
+
+  const [spielerName, coachName] = await Promise.all([
+    spielerRecordId ? resolveSpielerName(spielerRecordId) : Promise.resolve("–"),
+    coachRecordId ? resolveCoachName(coachRecordId) : Promise.resolve("–"),
+  ]);
 
   return {
     id: data.id,
     datum: f["Datum"] ?? "",
     sessionTyp: f["Session-Typ"] ?? "",
-    spielerName: spielerRaw?.[0] ?? "–",
-    coachName: coachRaw?.[0] ?? "–",
+    spielerName,
+    coachName,
     dauer: f["Dauer (Minuten)"] ?? null,
     medium: f["Medium"] ?? null,
     notizen: f["Notizen"] ?? null,
