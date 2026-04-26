@@ -183,7 +183,7 @@ export async function generatePdfBuffer(
             stack: [
               { text: 'FOOTBALL LEVERAGE', fontSize: 16, bold: true, color: FL_GREEN },
               {
-                text: 'SESSION PROTOKOLL · VERTRAULICH',
+                text: 'SESSION PROTOKOLL',
                 fontSize: 9,
                 color: GRAY,
                 margin: [0, 2, 0, 0],
@@ -230,7 +230,7 @@ export async function generatePdfBuffer(
     footer: (_page: number, _count: number) => ({
       columns: [
         {
-          text: `Erstellt am ${new Date().toLocaleDateString('de-DE')} · Nur für interne Verwendung`,
+          text: `Erstellt am ${new Date().toLocaleDateString('de-DE')}`,
           fontSize: 7.5,
           color: GRAY,
         },
