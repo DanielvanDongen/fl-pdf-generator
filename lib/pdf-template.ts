@@ -24,7 +24,7 @@ function parseLines(text: string | null): string[] {
   if (!text) return [];
   return text
     .split(/\n+/)
-    .map(l => l.trim())
+    .map(l => l.replace(/^#{1,6}\s*/, '').trim())
     .filter(Boolean);
 }
 
