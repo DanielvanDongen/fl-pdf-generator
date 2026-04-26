@@ -1,10 +1,9 @@
 import { SignJWT, jwtVerify } from "jose";
-import type { SessionRecord } from "./airtable";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 
-export async function signDownloadToken(session: SessionRecord): Promise<string> {
-  return new SignJWT({ session })
+export async function signDownloadToken(recordId: string): Promise<string> {
+  return new SignJWT({ recordId })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("5m")
     .setIssuedAt()
@@ -13,7 +12,7 @@ export async function signDownloadToken(session: SessionRecord): Promise<string>
 
 export async function verifyDownloadToken(
   token: string
-): Promise<{ session: SessionRecord }> {
+): Promise<{ recordId: string }> {
   const { payload } = await jwtVerify(token, secret);
-  return { session: payload.session as SessionRecord };
+  return { recordId: payload.recordId as string };
 }

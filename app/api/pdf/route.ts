@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyDownloadToken } from "@/lib/token";
+import { fetchSession } from "@/lib/airtable";
 import { SessionPDF } from "@/lib/pdf-template";
 import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import React from "react";
@@ -12,14 +13,22 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Missing token", { status: 400 });
   }
 
-  let session;
+  let recordId: string;
   try {
-    ({ session } = await verifyDownloadToken(token));
+    ({ recordId } = await verifyDownloadToken(token));
   } catch {
     return new NextResponse(
       "Link abgelaufen oder ungültig. Bitte neues PDF in Airtable generieren.",
       { status: 410 }
     );
+  }
+
+  let session;
+  try {
+    session = await fetchSession(recordId);
+  } catch (err) {
+    console.error("Airtable fetch error:", err);
+    return new NextResponse("Session nicht gefunden", { status: 404 });
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signDownloadToken } from "@/lib/token";
-import { writeDownloadUrl } from "@/lib/airtable";
-import type { SessionRecord } from "@/lib/airtable";
+import { fetchSession, writeDownloadUrl } from "@/lib/airtable";
 
 export const runtime = "nodejs";
 
@@ -11,43 +10,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
+  let recordId: string;
   try {
-    body = await req.json();
+    const body = await req.json();
+    recordId = body.recordId;
+    if (!recordId || typeof recordId !== "string") {
+      return NextResponse.json({ error: "Missing recordId" }, { status: 400 });
+    }
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const recordId = body.recordId as string;
-  if (!recordId) {
-    return NextResponse.json({ error: "Missing recordId" }, { status: 400 });
+  try {
+    await fetchSession(recordId);
+  } catch (err) {
+    console.error("Airtable fetch error:", err);
+    return NextResponse.json({ error: "Record not found" }, { status: 404 });
   }
 
-  // Parse exportSelection — Airtable sends multiselect as comma-separated string
-  const exportRaw = body.exportSelection;
-  const exportSelection: string[] =
-    typeof exportRaw === "string"
-      ? exportRaw.split(",").map((s) => s.trim()).filter(Boolean)
-      : Array.isArray(exportRaw)
-      ? (exportRaw as string[])
-      : [];
-
-  const session: SessionRecord = {
-    id: recordId,
-    datum: (body.datum as string) ?? "",
-    sessionTyp: (body.sessionTyp as string) ?? "",
-    spielerName: (body.spielerName as string) ?? "–",
-    coachName: (body.coachName as string) ?? "–",
-    dauer: body.dauer ? Number(body.dauer) : null,
-    medium: (body.medium as string) ?? null,
-    notizen: (body.notizen as string) ?? null,
-    toDos: (body.toDos as string) ?? null,
-    routinen: (body.routinen as string) ?? null,
-    affirmationen: (body.affirmationen as string) ?? null,
-    exportSelection,
-  };
-
-  const token = await signDownloadToken(session);
+  const token = await signDownloadToken(recordId);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const downloadUrl = `${appUrl}/api/pdf?token=${token}`;
 
