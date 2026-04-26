@@ -25,7 +25,7 @@ function stripUnsupported(text: string): string {
   // Latin Extended-A (U+0100-U+017F) — covers all German umlauts and standard punctuation.
   // Also keep common typographic chars: en/em dash, smart quotes.
   // Everything else (emoji, symbols, etc.) is silently removed to prevent layout glitches.
-  return text.replace(/[^ -ſ–—‘’“”]/gu, '');
+  return text.replace(/[^ -ſ–—''""]/gu, '');
 }
 
 function parseLines(text: string | null): string[] {
@@ -86,7 +86,8 @@ function buildSection(title: string, text: string | null, asList = false): any[]
           },
         },
       ],
-      unbreakable: true,
+      // No unbreakable: true — allows long sections (Affirmationen, Routinen) to flow
+      // across multiple pages instead of being silently dropped by pdfmake.
       margin: [0, 0, 0, 18],
     },
   ];
