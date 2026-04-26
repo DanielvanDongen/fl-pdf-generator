@@ -25,7 +25,7 @@ export interface SessionRecord {
 }
 
 async function resolveSpielerName(recordId: string): Promise<string> {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${SPIELER_TABLE}/${recordId}?fields[]=Vorname&fields[]=Nachname`;
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${SPIELER_TABLE}/${recordId}`;
   const res = await fetch(url, { headers });
   if (!res.ok) return "–";
   const { fields } = await res.json();
@@ -33,7 +33,7 @@ async function resolveSpielerName(recordId: string): Promise<string> {
 }
 
 async function resolveCoachName(recordId: string): Promise<string> {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${COACHES_TABLE}/${recordId}?fields[]=${encodeURIComponent("Coach Name")}`;
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${COACHES_TABLE}/${recordId}`;
   const res = await fetch(url, { headers });
   if (!res.ok) return "–";
   const { fields } = await res.json();
