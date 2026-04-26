@@ -20,11 +20,19 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function stripUnsupported(text: string): string {
+  // Keep Basic Latin (U+0020-U+007E), Latin-1 Supplement (U+00A0-U+00FF),
+  // Latin Extended-A (U+0100-U+017F) — covers all German umlauts and standard punctuation.
+  // Also keep common typographic chars: en/em dash, smart quotes.
+  // Everything else (emoji, symbols, etc.) is silently removed to prevent layout glitches.
+  return text.replace(/[^ -ſ–—‘’“”]/gu, '');
+}
+
 function parseLines(text: string | null): string[] {
   if (!text) return [];
   return text
     .split(/\n+/)
-    .map(l => l.replace(/^#{1,6}\s*/, '').trim())
+    .map(l => stripUnsupported(l.replace(/^#{1,6}\s*/, '').trim()))
     .filter(Boolean);
 }
 
