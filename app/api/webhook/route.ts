@@ -1,47 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signDownloadToken } from "@/lib/token";
-import { fetchSession, writeDownloadUrl } from "@/lib/airtable";
+import { writeDownloadUrl } from "@/lib/airtable";
+import type { SessionRecord } from "@/lib/airtable";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  // Validate webhook secret
   const secret = req.headers.get("x-webhook-secret");
   if (secret !== process.env.WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let recordId: string;
+  let body: Record<string, unknown>;
   try {
-    const body = await req.json();
-    recordId = body.recordId;
-    if (!recordId || typeof recordId !== "string") {
-      return NextResponse.json(
-        { error: "Missing recordId" },
-        { status: 400 }
-      );
-    }
+    body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Verify the record exists before issuing token
-  try {
-    await fetchSession(recordId);
-  } catch (err) {
-    console.error("Airtable fetch error:", err);
-    return NextResponse.json(
-      { error: "Record not found" },
-      { status: 404 }
-    );
+  const recordId = body.recordId as string;
+  if (!recordId) {
+    return NextResponse.json({ error: "Missing recordId" }, { status: 400 });
   }
 
-  // Generate 5-minute signed download token
-  const token = await signDownloadToken(recordId);
+  // Parse exportSelection — Airtable sends multiselect as comma-separated string
+  const exportRaw = body.exportSelection;
+  const exportSelection: string[] =
+    typeof exportRaw === "string"
+      ? exportRaw.split(",").map((s) => s.trim()).filter(Boolean)
+      : Array.isArray(exportRaw)
+      ? (exportRaw as string[])
+      : [];
+
+  const session: SessionRecord = {
+    id: recordId,
+    datum: (body.datum as string) ?? "",
+    sessionTyp: (body.sessionTyp as string) ?? "",
+    spielerName: (body.spielerName as string) ?? "–",
+    coachName: (body.coachName as string) ?? "–",
+    dauer: body.dauer ? Number(body.dauer) : null,
+    medium: (body.medium as string) ?? null,
+    notizen: (body.notizen as string) ?? null,
+    toDos: (body.toDos as string) ?? null,
+    routinen: (body.routinen as string) ?? null,
+    affirmationen: (body.affirmationen as string) ?? null,
+    exportSelection,
+  };
+
+  const token = await signDownloadToken(session);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const downloadUrl = `${appUrl}/api/pdf?token=${token}`;
 
-  // Write the URL back to Airtable "Download PDF" field
   try {
     await writeDownloadUrl(recordId, downloadUrl);
   } catch (err) {

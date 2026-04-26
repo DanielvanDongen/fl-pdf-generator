@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyDownloadToken } from "@/lib/token";
-import { fetchSession } from "@/lib/airtable";
 import { SessionPDF } from "@/lib/pdf-template";
 import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import React from "react";
@@ -13,10 +12,9 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Missing token", { status: 400 });
   }
 
-  // Validate JWT — throws if expired or invalid
-  let recordId: string;
+  let session;
   try {
-    ({ recordId } = await verifyDownloadToken(token));
+    ({ session } = await verifyDownloadToken(token));
   } catch {
     return new NextResponse(
       "Link abgelaufen oder ungültig. Bitte neues PDF in Airtable generieren.",
@@ -24,20 +22,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Fetch fresh session data
-  let session;
-  try {
-    session = await fetchSession(recordId);
-  } catch (err) {
-    console.error("Airtable fetch error:", err);
-    return new NextResponse("Session nicht gefunden", { status: 404 });
-  }
-
-  // Logo URL — served from /public/logo.png
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const logoUrl = `${appUrl}/logo.png`;
 
-  // Generate PDF
   let pdfArrayBuffer: ArrayBuffer;
   try {
     const buf = await renderToBuffer(
@@ -46,7 +33,6 @@ export async function GET(req: NextRequest) {
         logoUrl,
       }) as React.ReactElement<DocumentProps>
     );
-    // Convert Node Buffer → ArrayBuffer (valid BodyInit in all environments)
     pdfArrayBuffer = buf.buffer.slice(
       buf.byteOffset,
       buf.byteOffset + buf.byteLength
