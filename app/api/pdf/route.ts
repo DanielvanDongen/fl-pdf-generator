@@ -66,12 +66,16 @@ export async function GET(req: NextRequest) {
   const playerSlug = session.spielerName.replace(/\s+/g, '-');
   const dateSlug = session.datum.replace(/\//g, '-');
   const filename = `FL-Session-${playerSlug}-${dateSlug}.pdf`;
+  // HTTP headers must be ASCII (ByteString). Strip non-ASCII for the legacy
+  // `filename` parameter and provide the original via RFC 5987 `filename*`.
+  const asciiFilename = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+  const encodedFilename = encodeURIComponent(filename);
 
   return new NextResponse(pdfArrayBuffer, {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
       'Cache-Control': 'no-store',
     },
   });
