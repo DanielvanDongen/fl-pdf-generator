@@ -33,11 +33,20 @@ function stripUnsupported(text: string): string {
   return text.replace(/[^ -ſ–—''""]/gu, '');
 }
 
+function stripChecklistMarkers(line: string): string {
+  // Remove leading list bullet + checkbox markers used in Markdown task lists,
+  // e.g. "[ ] foo", "[x] foo", "- [ ] foo", "* [X] foo", "1. [ ] foo",
+  // as well as bare unicode checkboxes "☐ foo", "☑ foo".
+  return line
+    .replace(/^\s*(?:[-*+]|\d+[.)])?\s*\[[ xX]?\]\s*/u, '')
+    .replace(/^\s*[☐☑✓✔]\s*/u, '');
+}
+
 function parseLines(text: string | null): string[] {
   if (!text) return [];
   return text
     .split(/\n+/)
-    .map(l => stripUnsupported(l.replace(/^#{1,6}\s*/, '').trim()))
+    .map(l => stripUnsupported(stripChecklistMarkers(l.replace(/^#{1,6}\s*/, '')).trim()))
     .filter(Boolean);
 }
 
