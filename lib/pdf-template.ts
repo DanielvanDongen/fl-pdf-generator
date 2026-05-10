@@ -146,14 +146,16 @@ function parseBlocks(md: string): Block[] {
     }
 
     // Plain line — could be a checkbox-only line (no leading bullet) we want to keep as bullet.
-    const bareCheckbox = /^\s*\[[ xX]?\]\s+(.*)$/.exec(line);
+    // Matches both Markdown task list `[ ]/[x]` and Unicode checkboxes ☐ ☑ ✓ ✔.
+    const checkboxRe = /^\s*(?:\[[ xX]?\]|[☐☑✓✔])\s+(.*)$/u;
+    const bareCheckbox = checkboxRe.exec(line);
     if (bareCheckbox) {
       flushPara();
-      const items: string[] = [stripChecklistMarkers(bareCheckbox[1]).trim()];
+      const items: string[] = [bareCheckbox[1].trim()];
       while (i + 1 < lines.length) {
-        const next = /^\s*\[[ xX]?\]\s+(.*)$/.exec(lines[i + 1].trimEnd());
+        const next = checkboxRe.exec(lines[i + 1].trimEnd());
         if (!next) break;
-        items.push(stripChecklistMarkers(next[1]).trim());
+        items.push(next[1].trim());
         i++;
       }
       blocks.push({ kind: 'ul', items: items.filter(Boolean) });
