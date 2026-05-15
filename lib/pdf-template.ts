@@ -9,12 +9,16 @@ export interface AttachmentImage {
 const pdfmakePrinter = require('pdfmake');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 pdfmakePrinter.addFonts(require('pdfmake/standard-fonts/Helvetica'));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+pdfmakePrinter.addFonts(require('pdfmake/standard-fonts/Courier'));
 
 const FL_GREEN = '#00C136';
 const DARK = '#1A1A1A';
 const GRAY = '#6B7280';
 const LIGHT_GRAY = '#F3F4F6';
 const BORDER = '#E5E7EB';
+const LINK_BLUE = '#0066CC';
+const QUOTE_BG = '#F9FAFB';
 
 const BODY_LINE_HEIGHT = 1.35;
 const BODY_FONT_SIZE = 10;
@@ -39,6 +43,11 @@ function stripUnsupported(text: string): string {
   return text.replace(/[^ -ſ–—''""]/gu, '');
 }
 
+// Like stripUnsupported but preserves newlines for code blocks
+function stripUnsupportedKeepNewlines(text: string): string {
+  return text.replace(/[^\n -ſ–—''""]/gu, '');
+}
+
 function stripChecklistMarkers(line: string): string {
   return line
     .replace(/^\s*\[[ xX]?\]\s*/u, '')
@@ -50,39 +59,238 @@ type InlineRun = {
   text: string;
   bold?: boolean;
   italics?: boolean;
-  decoration?: 'lineThrough';
+  decoration?: 'lineThrough' | 'underline';
+  color?: string;
+  background?: string;
+  link?: string;
+  font?: string;
 };
 
-// Parse **bold**, __bold__, *italic*, _italic_, ~~strike~~, `code` into pdfmake text runs.
-function parseInline(input: string): InlineRun[] {
+type InlineStyle = Omit<InlineRun, 'text'>;
+
+// Find the earliest matching inline marker. Returns null if none found.
+function findNextMarker(
+  text: string
+): { start: number; end: number; inner: string; style: InlineStyle } | null {
+  // Bold, strike, code, links scanned before italic so ** beats *.
+  // ***triple*** is treated as bold+italic via nested re-parse.
+  const patterns: Array<{ re: RegExp; build: (m: RegExpExecArray) => { inner: string; style: InlineStyle; rawLen: number } }> = [
+    {
+      re: /\*\*\*([^\n]+?)\*\*\*/g,
+      build: (m) => ({ inner: `*${m[1]}*`, style: { bold: true }, rawLen: m[0].length }),
+    },
+    {
+      re: /___([^\n]+?)___/g,
+      build: (m) => ({ inner: `_${m[1]}_`, style: { bold: true }, rawLen: m[0].length }),
+    },
+    {
+      re: /\*\*([^\n]+?)\*\*/g,
+      build: (m) => ({ inner: m[1], style: { bold: true }, rawLen: m[0].length }),
+    },
+    {
+      re: /__([^\n]+?)__/g,
+      build: (m) => ({ inner: m[1], style: { bold: true }, rawLen: m[0].length }),
+    },
+    {
+      re: /~~([^\n]+?)~~/g,
+      build: (m) => ({ inner: m[1], style: { decoration: 'lineThrough' }, rawLen: m[0].length }),
+    },
+    {
+      re: /`([^`\n]+)`/g,
+      build: (m) => ({
+        inner: '',
+        // code is terminal — content is m[1] with no further parsing
+        style: { background: LIGHT_GRAY, color: DARK, font: 'Courier' },
+        rawLen: m[0].length,
+      }),
+    },
+    {
+      re: /\[([^\]\n]+)\]\(([^)\s]+)\)/g,
+      build: (m) => ({
+        inner: '',
+        style: { link: m[2], color: LINK_BLUE, decoration: 'underline' },
+        rawLen: m[0].length,
+      }),
+    },
+    {
+      // italic *…* — emphasized: not preceded/followed by * (handled by trying after bold patterns)
+      re: /\*([^*\n]+?)\*/g,
+      build: (m) => ({ inner: m[1], style: { italics: true }, rawLen: m[0].length }),
+    },
+    {
+      re: /_([^_\n]+?)_/g,
+      build: (m) => ({ inner: m[1], style: { italics: true }, rawLen: m[0].length }),
+    },
+  ];
+
+  let best: { start: number; end: number; inner: string; style: InlineStyle; terminalText?: string } | null = null;
+
+  for (const { re, build } of patterns) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    if (!m) continue;
+    const built = build(m);
+    if (best && m.index >= best.start) continue;
+
+    // Determine inner content (for terminal markers like code/link, capture literal text)
+    let inner = built.inner;
+    let terminalText: string | undefined;
+    if (re.source.startsWith('`')) {
+      terminalText = m[1]; // code content - literal
+      inner = '';
+    } else if (re.source.startsWith('\\[')) {
+      terminalText = m[1]; // link label - literal (no further inline parsing inside link)
+      inner = '';
+    }
+
+    best = {
+      start: m.index,
+      end: m.index + built.rawLen,
+      inner,
+      style: built.style,
+      terminalText,
+    };
+  }
+
+  if (!best) return null;
+  return best.terminalText !== undefined
+    ? { start: best.start, end: best.end, inner: best.terminalText, style: { ...best.style, _terminal: true } as InlineStyle & { _terminal?: boolean } }
+    : { start: best.start, end: best.end, inner: best.inner, style: best.style };
+}
+
+function mergeStyle(base: InlineStyle, add: InlineStyle): InlineStyle {
+  return { ...base, ...add };
+}
+
+function parseInline(input: string, base: InlineStyle = {}): InlineRun[] {
   const text = stripUnsupported(input);
   const runs: InlineRun[] = [];
-  // Order: bold (** or __) > strike (~~) > code (`) > italic (* or _).
-  // Simple non-nested tokenizer.
-  const re =
-    /(\*\*([^*\n]+)\*\*)|(__([^_\n]+)__)|(~~([^~\n]+)~~)|(`([^`\n]+)`)|(\*([^*\n]+)\*)|(_([^_\n]+)_)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) runs.push({ text: text.slice(last, m.index) });
-    if (m[2] !== undefined) runs.push({ text: m[2], bold: true });
-    else if (m[4] !== undefined) runs.push({ text: m[4], bold: true });
-    else if (m[6] !== undefined) runs.push({ text: m[6], decoration: 'lineThrough' });
-    else if (m[8] !== undefined) runs.push({ text: m[8] });
-    else if (m[10] !== undefined) runs.push({ text: m[10], italics: true });
-    else if (m[12] !== undefined) runs.push({ text: m[12], italics: true });
-    last = re.lastIndex;
+  let i = 0;
+
+  while (i < text.length) {
+    const rest = text.slice(i);
+    const found = findNextMarker(rest);
+    if (!found) {
+      runs.push({ ...base, text: rest });
+      break;
+    }
+    if (found.start > 0) {
+      runs.push({ ...base, text: rest.slice(0, found.start) });
+    }
+    const isTerminal = (found.style as InlineStyle & { _terminal?: boolean })._terminal;
+    const cleanStyle: InlineStyle = { ...found.style };
+    delete (cleanStyle as InlineStyle & { _terminal?: boolean })._terminal;
+    if (isTerminal) {
+      // code / link: do not recurse into inner
+      runs.push({ ...mergeStyle(base, cleanStyle), text: found.inner });
+    } else {
+      runs.push(...parseInline(found.inner, mergeStyle(base, cleanStyle)));
+    }
+    i += found.end;
   }
-  if (last < text.length) runs.push({ text: text.slice(last) });
-  return runs.length > 0 ? runs : [{ text }];
+
+  return runs.length > 0 ? runs : [{ ...base, text }];
 }
 
 // ---------- Block Markdown parsing ----------
+type ListItem = {
+  text: string;
+  children?: { ordered: boolean; items: ListItem[] };
+};
+
 type Block =
   | { kind: 'paragraph'; text: string }
   | { kind: 'heading'; level: number; text: string }
-  | { kind: 'ul'; items: string[] }
-  | { kind: 'ol'; items: string[] };
+  | { kind: 'ul'; items: ListItem[] }
+  | { kind: 'ol'; items: ListItem[] }
+  | { kind: 'blockquote'; text: string }
+  | { kind: 'codeblock'; text: string }
+  | { kind: 'hr' };
+
+const UL_RE = /^(\s*)(?:[-*+]|\[[ xX]?\]|[☐☑✓✔])\s+(.*)$/u;
+const OL_RE = /^(\s*)(\d+)[.)]\s+(.*)$/;
+const HEADING_RE = /^(#{1,6})\s+(.+)$/;
+const HR_RE = /^\s*(?:-\s*){3,}\s*$|^\s*(?:\*\s*){3,}\s*$|^\s*(?:_\s*){3,}\s*$/;
+const BLOCKQUOTE_RE = /^\s*>\s?(.*)$/;
+const FENCE_RE = /^\s*```/;
+
+function getIndent(line: string): number {
+  const m = /^(\s*)/.exec(line);
+  return m ? m[1].replace(/\t/g, '    ').length : 0;
+}
+
+function matchListItem(line: string): { indent: number; ordered: boolean; text: string } | null {
+  const u = UL_RE.exec(line);
+  if (u) return { indent: getIndent(line), ordered: false, text: stripChecklistMarkers(u[2]) };
+  const o = OL_RE.exec(line);
+  if (o) return { indent: getIndent(line), ordered: true, text: stripChecklistMarkers(o[3]) };
+  return null;
+}
+
+// Parse a contiguous list starting at index `start`. Returns items + lines consumed.
+function parseListAt(
+  lines: string[],
+  start: number
+): { ordered: boolean; items: ListItem[]; consumed: number } {
+  const first = matchListItem(lines[start])!;
+  const baseIndent = first.indent;
+  const ordered = first.ordered;
+  const items: ListItem[] = [];
+  let i = start;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      // blank: peek ahead for more list items at same/deeper indent
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      if (j < lines.length) {
+        const peek = matchListItem(lines[j]);
+        if (peek && peek.indent >= baseIndent) {
+          i = j;
+          continue;
+        }
+      }
+      break;
+    }
+    const m = matchListItem(line);
+    if (!m) break;
+    if (m.indent < baseIndent) break;
+    if (m.indent > baseIndent) {
+      // Belongs to a nested list under the previous item
+      const nested = parseListAt(lines, i);
+      const prev = items[items.length - 1];
+      if (prev) {
+        prev.children = { ordered: nested.ordered, items: nested.items };
+      } else {
+        // No prior item — treat as new list
+        items.push({ text: '' });
+        items[0].children = { ordered: nested.ordered, items: nested.items };
+      }
+      i += nested.consumed;
+      continue;
+    }
+    // Same level — could be different ordered/unordered. If different, stop.
+    if (m.ordered !== ordered) break;
+    items.push({ text: m.text });
+    i++;
+    // Continuation lines (indented under this item, not a list marker)
+    while (i < lines.length) {
+      const nextLine = lines[i];
+      if (!nextLine.trim()) break;
+      const nm = matchListItem(nextLine);
+      if (nm) break;
+      const ni = getIndent(nextLine);
+      if (ni > baseIndent) {
+        items[items.length - 1].text += ' ' + nextLine.trim();
+        i++;
+        continue;
+      }
+      break;
+    }
+  }
+  return { ordered, items, consumed: i - start };
+}
 
 function parseBlocks(md: string): Block[] {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
@@ -100,14 +308,38 @@ function parseBlocks(md: string): Block[] {
   while (i < lines.length) {
     const raw = lines[i];
     const line = raw.trimEnd();
+    const trimmed = line.trim();
 
-    if (!line.trim()) {
+    if (!trimmed) {
       flushPara();
       i++;
       continue;
     }
 
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    // Horizontal rule
+    if (HR_RE.test(line)) {
+      flushPara();
+      blocks.push({ kind: 'hr' });
+      i++;
+      continue;
+    }
+
+    // Fenced code block
+    if (FENCE_RE.test(line)) {
+      flushPara();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !FENCE_RE.test(lines[i])) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // skip closing fence
+      blocks.push({ kind: 'codeblock', text: codeLines.join('\n') });
+      continue;
+    }
+
+    // Heading
+    const heading = HEADING_RE.exec(trimmed);
     if (heading) {
       flushPara();
       blocks.push({ kind: 'heading', level: heading[1].length, text: heading[2] });
@@ -115,110 +347,176 @@ function parseBlocks(md: string): Block[] {
       continue;
     }
 
-    const ulMatch = /^\s*[-*+]\s+(.*)$/.exec(line);
-    if (ulMatch) {
+    // Blockquote
+    if (BLOCKQUOTE_RE.test(line)) {
       flushPara();
-      const items: string[] = [];
+      const quoteLines: string[] = [];
       while (i < lines.length) {
-        const m = /^\s*[-*+]\s+(.*)$/.exec(lines[i].trimEnd());
+        const m = BLOCKQUOTE_RE.exec(lines[i]);
         if (!m) break;
-        const cleaned = stripChecklistMarkers(m[1]).trim();
-        if (cleaned) items.push(cleaned);
+        quoteLines.push(m[1]);
         i++;
       }
-      if (items.length) blocks.push({ kind: 'ul', items });
+      blocks.push({ kind: 'blockquote', text: quoteLines.join('\n').trim() });
       continue;
     }
 
-    const olMatch = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (olMatch) {
+    // List (ul/ol with nesting)
+    const listMatch = matchListItem(line);
+    if (listMatch) {
       flushPara();
-      const items: string[] = [];
-      while (i < lines.length) {
-        const m = /^\s*\d+[.)]\s+(.*)$/.exec(lines[i].trimEnd());
-        if (!m) break;
-        const cleaned = stripChecklistMarkers(m[1]).trim();
-        if (cleaned) items.push(cleaned);
-        i++;
-      }
-      if (items.length) blocks.push({ kind: 'ol', items });
+      const parsed = parseListAt(lines, i);
+      blocks.push(
+        parsed.ordered
+          ? { kind: 'ol', items: parsed.items }
+          : { kind: 'ul', items: parsed.items }
+      );
+      i += parsed.consumed;
       continue;
     }
 
-    // Plain line — could be a checkbox-only line (no leading bullet) we want to keep as bullet.
-    // Matches both Markdown task list `[ ]/[x]` and Unicode checkboxes ☐ ☑ ✓ ✔.
-    const checkboxRe = /^\s*(?:\[[ xX]?\]|[☐☑✓✔])\s+(.*)$/u;
-    const bareCheckbox = checkboxRe.exec(line);
-    if (bareCheckbox) {
-      flushPara();
-      const items: string[] = [bareCheckbox[1].trim()];
-      while (i + 1 < lines.length) {
-        const next = checkboxRe.exec(lines[i + 1].trimEnd());
-        if (!next) break;
-        items.push(next[1].trim());
-        i++;
-      }
-      blocks.push({ kind: 'ul', items: items.filter(Boolean) });
-      i++;
-      continue;
-    }
-
-    para.push(stripChecklistMarkers(line.replace(/^#{1,6}\s*/, '')));
+    // Plain paragraph line
+    para.push(stripChecklistMarkers(trimmed.replace(/^#{1,6}\s*/, '')));
     i++;
   }
   flushPara();
   return blocks;
 }
 
+// ---------- Render blocks to pdfmake content ----------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderListItems(items: ListItem[], ordered: boolean, depth: number): any[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: any[] = [];
+  const indentPt = 14 * depth;
+
+  items.forEach((item, idx) => {
+    const marker = ordered ? `${idx + 1}.` : '›';
+    out.push({
+      columns: [
+        {
+          text: marker,
+          width: ordered ? 18 : 14,
+          bold: true,
+          color: FL_GREEN,
+          fontSize: BODY_FONT_SIZE,
+        },
+        {
+          text: parseInline(item.text),
+          fontSize: BODY_FONT_SIZE,
+          color: DARK,
+          lineHeight: BODY_LINE_HEIGHT,
+        },
+      ],
+      margin: [indentPt, 0, 0, LIST_ITEM_GAP],
+    });
+    if (item.children) {
+      out.push(
+        ...renderListItems(item.children.items, item.children.ordered, depth + 1).map((node) => ({
+          ...node,
+          margin: [
+            indentPt + 14,
+            (node.margin?.[1] ?? 0) as number,
+            0,
+            (node.margin?.[3] ?? LIST_ITEM_GAP) as number,
+          ],
+        }))
+      );
+    }
+  });
+
+  return out;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function blockToContent(block: Block): any {
   if (block.kind === 'heading') {
-    const fontSize = block.level <= 2 ? 12 : 11;
+    const fontSize = block.level <= 1 ? 13 : block.level === 2 ? 12 : 11;
     return {
-      text: parseInline(block.text),
-      bold: true,
+      text: parseInline(block.text, { bold: true, color: DARK }),
       fontSize,
-      color: DARK,
       lineHeight: BODY_LINE_HEIGHT,
-      margin: [0, 4, 0, 6],
+      margin: [0, 6, 0, 6],
     };
   }
-  if (block.kind === 'ul') {
+  if (block.kind === 'ul' || block.kind === 'ol') {
+    return { stack: renderListItems(block.items, block.kind === 'ol', 0) };
+  }
+  if (block.kind === 'blockquote') {
     return {
-      stack: block.items.map((item) => ({
-        columns: [
-          { text: '›', width: 14, bold: true, color: FL_GREEN, fontSize: BODY_FONT_SIZE },
-          {
-            text: parseInline(item),
-            fontSize: BODY_FONT_SIZE,
-            color: DARK,
-            lineHeight: BODY_LINE_HEIGHT,
-          },
+      table: {
+        widths: ['*'],
+        body: [
+          [
+            {
+              text: parseInline(block.text, { color: GRAY, italics: true }),
+              fontSize: BODY_FONT_SIZE,
+              lineHeight: BODY_LINE_HEIGHT,
+              fillColor: QUOTE_BG,
+            },
+          ],
         ],
-        margin: [0, 0, 0, LIST_ITEM_GAP],
-      })),
+      },
+      layout: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        hLineWidth: () => 0,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vLineWidth: (col: number) => (col === 0 ? 3 : 0),
+        vLineColor: () => FL_GREEN,
+        paddingLeft: () => 10,
+        paddingRight: () => 10,
+        paddingTop: () => 8,
+        paddingBottom: () => 8,
+      },
+      margin: [0, 0, 0, PARAGRAPH_GAP],
     };
   }
-  if (block.kind === 'ol') {
+  if (block.kind === 'codeblock') {
     return {
-      stack: block.items.map((item, idx) => ({
-        columns: [
-          {
-            text: `${idx + 1}.`,
-            width: 16,
-            bold: true,
-            color: FL_GREEN,
-            fontSize: BODY_FONT_SIZE,
-          },
-          {
-            text: parseInline(item),
-            fontSize: BODY_FONT_SIZE,
-            color: DARK,
-            lineHeight: BODY_LINE_HEIGHT,
-          },
+      table: {
+        widths: ['*'],
+        body: [
+          [
+            {
+              text: stripUnsupportedKeepNewlines(block.text),
+              font: 'Courier',
+              fontSize: 9,
+              color: DARK,
+              lineHeight: 1.25,
+              fillColor: LIGHT_GRAY,
+              preserveLeadingSpaces: true,
+            },
+          ],
         ],
-        margin: [0, 0, 0, LIST_ITEM_GAP],
-      })),
+      },
+      layout: {
+        hLineWidth: () => 1,
+        vLineWidth: () => 1,
+        hLineColor: () => BORDER,
+        vLineColor: () => BORDER,
+        paddingLeft: () => 10,
+        paddingRight: () => 10,
+        paddingTop: () => 8,
+        paddingBottom: () => 8,
+      },
+      margin: [0, 0, 0, PARAGRAPH_GAP],
+    };
+  }
+  if (block.kind === 'hr') {
+    return {
+      canvas: [
+        {
+          type: 'line',
+          x1: 0,
+          y1: 0,
+          x2: CONTENT_WIDTH - 24,
+          y2: 0,
+          lineWidth: 0.5,
+          lineColor: BORDER,
+        },
+      ],
+      margin: [0, 6, 0, 10],
     };
   }
   // paragraph
@@ -494,3 +792,6 @@ export async function generatePdfBuffer(
   const doc = pdfmakePrinter.createPdf(docDef);
   return doc.getBuffer() as Promise<Buffer>;
 }
+
+// ---------- Test helpers (exported for local verification only) ----------
+export const __test = { parseInline, parseBlocks };
