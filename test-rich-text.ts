@@ -184,10 +184,10 @@ function example() {
 ---
 
 Letzter Absatz mit **abschließenden** Gedanken.`,
-  toDos: `- [ ] Offene Aufgabe mit **fettem** Text
+  aufgaben: `- [ ] Offene Aufgabe mit **fettem** Text
 - [x] Erledigte Aufgabe
 - [ ] Aufgabe mit *Kursiv* und [Link](https://example.com/aufgabe)`,
-  toDosAbgeschlossen: `[x] Alles erledigt
+  aufgabenAbgeschlossen: `[x] Alles erledigt
 [x] Bestätigt durch **Coach**`,
   routinen: `Tägliche Routine:
 

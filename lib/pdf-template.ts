@@ -620,8 +620,9 @@ export async function generatePdfBuffer(
   const showAll = sel.length === 0;
   const showNotizen = showAll || sel.includes('Notiz');
   const showZusammenfassung = showAll || sel.includes('Zusammenfassung Transkript');
-  const showToDos = showAll || sel.includes('To-Dos');
-  const showToDosAbgeschlossen = showAll || sel.includes('To-Dos (abgeschlossen)');
+  const showAufgaben = showAll || sel.includes('Aufgaben');
+  const showAufgabenAbgeschlossen =
+    showAll || sel.includes('Aufgaben (abgeschlossen)');
   const showRoutinen = showAll || sel.includes('Routinen');
   const showAffirmationen = showAll || sel.includes('Affirmation');
   const showAnhänge = showAll || sel.includes('Anhänge');
@@ -632,9 +633,9 @@ export async function generatePdfBuffer(
     ...(showZusammenfassung
       ? buildSection('ZUSAMMENFASSUNG TRANSKRIPT', session.zusammenfassungTranskript)
       : []),
-    ...(showToDos ? buildSection('TO-DOS', session.toDos) : []),
-    ...(showToDosAbgeschlossen
-      ? buildSection('TO-DOS (ABGESCHLOSSEN)', session.toDosAbgeschlossen)
+    ...(showAufgaben ? buildSection('AUFGABEN', session.aufgaben) : []),
+    ...(showAufgabenAbgeschlossen
+      ? buildSection('AUFGABEN (ABGESCHLOSSEN)', session.aufgabenAbgeschlossen)
       : []),
     ...(showRoutinen ? buildSection('ROUTINEN', session.routinen) : []),
     ...(showAffirmationen ? buildSection('AFFIRMATIONEN', session.affirmationen) : []),

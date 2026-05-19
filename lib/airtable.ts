@@ -28,8 +28,8 @@ export interface SessionRecord {
   dauer: number | null;
   medium: string | null;
   notizen: string | null;
-  toDos: string | null;
-  toDosAbgeschlossen: string | null;
+  aufgaben: string | null;
+  aufgabenAbgeschlossen: string | null;
   routinen: string | null;
   affirmationen: string | null;
   zusammenfassungTranskript: string | null;
@@ -81,9 +81,10 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
     dauer: f["Dauer (Minuten)"] ?? null,
     medium: f["Medium"] ?? null,
     notizen: f["Notizen"] ?? null,
-    toDos: (f["To Dos (from Spieler)"] as string[] | undefined)?.[0] ?? null,
-    toDosAbgeschlossen:
-      (f["To Dos (abgeschlossen)"] as string[] | undefined)?.[0] ?? null,
+    aufgaben:
+      (f["Aufgaben (from Spieler)"] as string[] | undefined)?.[0] ?? null,
+    aufgabenAbgeschlossen:
+      (f["Aufgaben (abgeschlossen)"] as string[] | undefined)?.[0] ?? null,
     routinen:
       (f["Routinen (from Spieler)"] as string[] | undefined)?.[0] ?? null,
     affirmationen:
