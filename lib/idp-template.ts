@@ -20,9 +20,9 @@ const PAGE_H = 540;
 
 // Page-3 table geometry (full-bleed: pageMargins are 0)
 const FIRST_COL_W = 132;
-const HEADER_H = 30;
+const HEADER_H = 34;
 // A few points of slack below the header so all 4 rows + borders fit on one page.
-const ROW_H = Math.floor((PAGE_H - HEADER_H - 8) / 4); // ≈125 → table fills the slide
+const ROW_H = Math.floor((PAGE_H - HEADER_H - 8) / 4); // ≈124 → table fills the slide
 const PILLAR_BLOCK_H = 68; // icon + gap + label, for vertical centering
 
 const PILLARS = [
@@ -105,11 +105,20 @@ export async function generateIdpBuffer(
   const { logoDataUrl, iconDataUrls } = assets;
 
   // ---- Page 3: pillar table ----
-  const headerRow = [
-    { text: 'SÄULEN', fillColor: SLATE, color: WHITE, bold: true, fontSize: 12, alignment: 'center', margin: [0, 6, 0, 6] },
-    { text: 'STÄRKEN', fillColor: SLATE, color: WHITE, bold: true, fontSize: 12, alignment: 'center', margin: [0, 6, 0, 6] },
-    { text: 'ENTWICKLUNGSFELDER', fillColor: SLATE, color: WHITE, bold: true, fontSize: 12, alignment: 'center', margin: [0, 6, 0, 6] },
-  ];
+  // Header text vertically centered in the HEADER_H-tall row (paddingTop is 0).
+  const headerTopMargin = Math.max(0, Math.round((HEADER_H - 13) / 2));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const headerCell = (label: string): any => ({
+    text: label,
+    fillColor: SLATE,
+    color: WHITE,
+    bold: true,
+    fontSize: 12.5,
+    characterSpacing: 0.5,
+    alignment: 'center',
+    margin: [0, headerTopMargin, 0, 0],
+  });
+  const headerRow = [headerCell('SÄULEN'), headerCell('STÄRKEN'), headerCell('ENTWICKLUNGSFELDER')];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dataRows: any[][] = PILLARS.map((p) => {
