@@ -12,12 +12,18 @@ const SLATE = '#4A5881';
 const WHITE = '#FFFFFF';
 const BLACK = '#000000';
 const TEXT = '#1F2937';
-const BORDER = '#FFFFFF';
+const GRID = '#C5CCDA'; // light slate-gray gridlines (visible on white + slate)
 
 // 16:9 slide
 const PAGE_W = 960;
 const PAGE_H = 540;
-const H_MARGIN = 40;
+
+// Page-3 table geometry (full-bleed: pageMargins are 0)
+const FIRST_COL_W = 132;
+const HEADER_H = 30;
+// A few points of slack below the header so all 4 rows + borders fit on one page.
+const ROW_H = Math.floor((PAGE_H - HEADER_H - 8) / 4); // ≈125 → table fills the slide
+const PILLAR_BLOCK_H = 68; // icon + gap + label, for vertical centering
 
 const PILLARS = [
   { key: 'physis', label: 'PHYSIS' },
@@ -66,24 +72,29 @@ function bulletList(lines: string[]): any {
     return { text: '–', color: TEXT, fontSize: 11 };
   }
   return {
+    // small top margin so bullets aren't glued to the cell's top edge
+    margin: [0, 14, 0, 0],
     stack: items.map((line) => ({
       columns: [
-        { text: '•', width: 11, color: SLATE, fontSize: 9, bold: true },
-        { text: line.trim(), width: '*', color: TEXT, fontSize: 9, lineHeight: 1.15 },
+        { text: '•', width: 12, color: SLATE, fontSize: 9.5, bold: true },
+        { text: line.trim(), width: '*', color: TEXT, fontSize: 9.5, lineHeight: 1.2 },
       ],
-      margin: [0, 0, 0, 3],
+      margin: [0, 0, 0, 5],
     })),
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function pillarCell(label: string, iconDataUrl: string): any {
+  // Vertically center the icon + label block inside the fixed-height slate cell.
+  const topMargin = Math.max(0, Math.round((ROW_H - PILLAR_BLOCK_H) / 2));
   return {
     fillColor: SLATE,
     stack: [
-      { image: iconDataUrl, width: 40, alignment: 'center', margin: [0, 0, 0, 8] },
-      { text: label, color: WHITE, bold: true, fontSize: 12, alignment: 'center' },
+      { image: iconDataUrl, width: 44, alignment: 'center', margin: [0, 0, 0, 8] },
+      { text: label, color: WHITE, bold: true, fontSize: 12.5, alignment: 'center', characterSpacing: 0.5 },
     ],
+    margin: [0, topMargin, 0, 0],
   };
 }
 
@@ -126,7 +137,8 @@ export async function generateIdpBuffer(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docDef: any = {
     pageSize: { width: PAGE_W, height: PAGE_H },
-    pageMargins: [H_MARGIN, 16, H_MARGIN, 16],
+    // Zero page margins → the page-3 table is full-bleed. Pages 1-2 inset content via element margins.
+    pageMargins: [0, 0, 0, 0],
     defaultStyle: { font: 'Helvetica', color: TEXT },
     background: (currentPage: number) =>
       currentPage <= 2
@@ -134,11 +146,11 @@ export async function generateIdpBuffer(
         : null,
     content: [
       // ---------- PAGE 1: cover ----------
-      { image: logoDataUrl, width: 620, alignment: 'center', margin: [0, 74, 0, 0] },
+      { image: logoDataUrl, width: 620, alignment: 'center', margin: [0, 92, 0, 0] },
       { text: '', pageBreak: 'after' },
 
       // ---------- PAGE 2: player info ----------
-      { image: logoDataUrl, width: 300, alignment: 'center', margin: [0, 30, 0, 0] },
+      { image: logoDataUrl, width: 300, alignment: 'center', margin: [0, 46, 0, 0] },
       {
         columns: [
           {
@@ -168,29 +180,30 @@ export async function generateIdpBuffer(
             ],
           },
         ],
-        margin: [24, 150, 24, 0],
+        margin: [60, 150, 60, 0],
       },
       { text: '', pageBreak: 'after' },
 
-      // ---------- PAGE 3: pillar table ----------
+      // ---------- PAGE 3: pillar table (full-bleed) ----------
       {
         table: {
-          widths: [128, '*', '*'],
+          widths: [FIRST_COL_W, '*', '*'],
           headerRows: 1,
           dontBreakRows: true,
-          // Equal pillar rows that fill the slide height under the header.
-          heights: (row: number) => (row === 0 ? 24 : 102),
+          // Equal pillar rows that fill the full slide height under the header.
+          heights: (row: number) => (row === 0 ? HEADER_H : ROW_H),
           body: [headerRow, ...dataRows],
         },
         layout: {
-          hLineWidth: () => 3,
-          vLineWidth: () => 3,
-          hLineColor: () => BORDER,
-          vLineColor: () => BORDER,
-          paddingLeft: () => 12,
-          paddingRight: () => 12,
-          paddingTop: (row: number) => (row === 0 ? 0 : 6),
-          paddingBottom: (row: number) => (row === 0 ? 0 : 6),
+          // Thin, clean gridlines visible on both white content cells and slate cells.
+          hLineWidth: () => 1.5,
+          vLineWidth: () => 1.5,
+          hLineColor: () => GRID,
+          vLineColor: () => GRID,
+          paddingLeft: () => 16,
+          paddingRight: () => 16,
+          paddingTop: () => 0,
+          paddingBottom: () => 0,
         },
       },
     ],
