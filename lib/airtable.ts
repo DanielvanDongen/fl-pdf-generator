@@ -37,12 +37,44 @@ export interface SessionRecord {
   anhänge: AirtableAttachment[] | null;
 }
 
-async function resolveSpielerName(recordId: string): Promise<string> {
+interface SpielerData {
+  name: string;
+  aufgaben: string | null;
+  aufgabenAbgeschlossen: string | null;
+  routinen: string | null;
+  affirmationen: string | null;
+}
+
+const EMPTY_SPIELER: SpielerData = {
+  name: "–",
+  aufgaben: null,
+  aufgabenAbgeschlossen: null,
+  routinen: null,
+  affirmationen: null,
+};
+
+// Read the player's rich-text fields DIRECTLY from the Spieler record. The
+// session's "(from Spieler)" lookups strip all rich-text formatting (bold,
+// italic, …) to plain text, so reading the source fields is the only way to
+// keep markdown for the PDF. Name resolution happens here too (one fetch).
+async function resolveSpieler(recordId: string): Promise<SpielerData> {
   const url = `https://api.airtable.com/v0/${BASE_ID}/${SPIELER_TABLE}/${recordId}`;
   const res = await fetch(url, { headers });
-  if (!res.ok) return "–";
+  if (!res.ok) return EMPTY_SPIELER;
   const { fields } = await res.json();
-  return [fields["Vorname"], fields["Nachname"]].filter(Boolean).join(" ") || "–";
+  const richText = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() ? v : null;
+  const name =
+    [fields["Vorname"], fields["Nachname"]].filter(Boolean).join(" ") ||
+    fields["Vollständiger Name"] ||
+    "–";
+  return {
+    name,
+    aufgaben: richText(fields["Aufgaben"]),
+    aufgabenAbgeschlossen: richText(fields["Aufgaben (abgeschlossen)"]),
+    routinen: richText(fields["Routinen"]),
+    affirmationen: richText(fields["Affirmationen"]),
+  };
 }
 
 async function resolveCoachName(recordId: string): Promise<string> {
@@ -67,8 +99,8 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
   const spielerRecordId = (f["Spieler"] as string[] | undefined)?.[0] ?? null;
   const coachRecordId = (f["Coach"] as string[] | undefined)?.[0] ?? null;
 
-  const [spielerName, coachName] = await Promise.all([
-    spielerRecordId ? resolveSpielerName(spielerRecordId) : Promise.resolve("–"),
+  const [spieler, coachName] = await Promise.all([
+    spielerRecordId ? resolveSpieler(spielerRecordId) : Promise.resolve(EMPTY_SPIELER),
     coachRecordId ? resolveCoachName(coachRecordId) : Promise.resolve("–"),
   ]);
 
@@ -76,19 +108,17 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
     id: data.id,
     datum: f["Datum"] ?? "",
     sessionTyp: f["Session-Typ"] ?? "",
-    spielerName,
+    spielerName: spieler.name,
     coachName,
     dauer: f["Dauer (Minuten)"] ?? null,
     medium: f["Medium"] ?? null,
     notizen: f["Notizen"] ?? null,
-    aufgaben:
-      (f["Aufgaben (from Spieler)"] as string[] | undefined)?.[0] ?? null,
-    aufgabenAbgeschlossen:
-      (f["Aufgaben (abgeschlossen)"] as string[] | undefined)?.[0] ?? null,
-    routinen:
-      (f["Routinen (from Spieler)"] as string[] | undefined)?.[0] ?? null,
-    affirmationen:
-      (f["Affirmationen (from Spieler)"] as string[] | undefined)?.[0] ?? null,
+    // Read from the Spieler source fields (markdown-preserving), NOT the
+    // session lookups (which strip rich-text formatting).
+    aufgaben: spieler.aufgaben,
+    aufgabenAbgeschlossen: spieler.aufgabenAbgeschlossen,
+    routinen: spieler.routinen,
+    affirmationen: spieler.affirmationen,
     zusammenfassungTranskript: f["Zusammenfassung Transkript"] ?? null,
     exportSelection: (f["Export Selection"] as string[] | undefined) ?? [],
     anhänge: (f["Anhänge"] as AirtableAttachment[] | undefined) ?? null,
