@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyDownloadToken } from '@/lib/token';
 import { fetchSession, consumeJti } from '@/lib/airtable';
-import { generatePdfBuffer, type AttachmentImage } from '@/lib/pdf-template';
+import { generatePdfBuffer, type PdfAttachment } from '@/lib/pdf-template';
 import path from 'path';
 import fs from 'fs';
 
@@ -81,29 +81,48 @@ export async function GET(req: NextRequest) {
   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
   const logoDataUrl = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
 
-  const shouldFetchImages =
+  const shouldFetchAttachments =
     session.exportSelection.length === 0 || session.exportSelection.includes('Anhänge');
 
-  const attachmentImages: AttachmentImage[] = shouldFetchImages && session.anhänge?.length
+  // Cap converted text so a huge file can't blow up the PDF.
+  const MAX_TEXT_CHARS = 200_000;
+  const isTextAttachment = (type: string, filename: string) =>
+    type.startsWith('text/') || /\.(txt|md|markdown)$/i.test(filename);
+
+  const attachments: PdfAttachment[] = shouldFetchAttachments && session.anhänge?.length
     ? (await Promise.all(
+        // Preserve the field order; render images and text docs interleaved.
         session.anhänge
-          .filter((att) => att.type.startsWith('image/') && isAllowedAttachmentUrl(att.url))
-          .map(async (att) => {
+          .filter((att) => isAllowedAttachmentUrl(att.url))
+          .map(async (att): Promise<PdfAttachment | null> => {
+            const isImage = att.type.startsWith('image/');
+            const isText = !isImage && isTextAttachment(att.type, att.filename);
+            if (!isImage && !isText) return null; // skip PDFs, binaries, etc.
             try {
               const res = await fetch(att.url);
               if (!res.ok) return null;
               const buf = Buffer.from(await res.arrayBuffer());
-              return { dataUrl: `data:${att.type};base64,${buf.toString('base64')}`, filename: att.filename };
+              if (isImage) {
+                return {
+                  kind: 'image',
+                  dataUrl: `data:${att.type};base64,${buf.toString('base64')}`,
+                  filename: att.filename,
+                };
+              }
+              const full = buf.toString('utf-8');
+              const text =
+                full.length > MAX_TEXT_CHARS ? full.slice(0, MAX_TEXT_CHARS) + '\n…' : full;
+              return { kind: 'text', text, filename: att.filename };
             } catch {
               return null;
             }
           })
-      )).filter((r): r is AttachmentImage => r !== null)
+      )).filter((r): r is PdfAttachment => r !== null)
     : [];
 
   let pdfArrayBuffer: ArrayBuffer;
   try {
-    const buf = await generatePdfBuffer(session, logoDataUrl, attachmentImages);
+    const buf = await generatePdfBuffer(session, logoDataUrl, attachments);
     pdfArrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
   } catch (err) {
     console.error('PDF generation error:', err instanceof Error ? err.stack : err);

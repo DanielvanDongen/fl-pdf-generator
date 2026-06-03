@@ -1,4 +1,4 @@
-import { generatePdfBuffer, __test, type AttachmentImage } from './lib/pdf-template';
+import { generatePdfBuffer, __test, type PdfAttachment } from './lib/pdf-template';
 import type { SessionRecord } from './lib/airtable';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -244,12 +244,44 @@ Siehe \`config.json\` für Details.`,
 (async () => {
   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
   const logoDataUrl = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
-  const attachments: AttachmentImage[] = [];
+  const attachments: PdfAttachment[] = [];
 
   const buf = await generatePdfBuffer(session, logoDataUrl, attachments);
   const out = path.join(process.cwd(), 'test-rich-text.pdf');
   fs.writeFileSync(out, buf);
   console.log(`  ✓ Wrote ${out} (${buf.length} bytes)`);
+
+  // Second PDF: text-document attachments rendered as real, titled documents.
+  const logoPng = fs.readFileSync(logoPath).toString('base64');
+  const docAttachments: PdfAttachment[] = [
+    {
+      kind: 'text',
+      filename: 'Trainingsplan Woche 12.md',
+      text: `# Trainingsplan – Woche 12
+
+**Fokus:** Aktivierung vor dem Spiel.
+
+- Montag: ~~Pause~~ leichtes Joggen
+- Mittwoch: **Sprint-Intervalle**
+- Freitag: Spielform
+
+> Wichtig: jeden Tag 1 Affirmation laut sprechen.`,
+    },
+    {
+      kind: 'text',
+      filename: 'notiz.txt',
+      text: `Einfacher Plain-Text ohne Markdown.\nZweite Zeile.\n\nNeuer Absatz hier.`,
+    },
+    { kind: 'image', filename: 'tafelbild.png', dataUrl: `data:image/png;base64,${logoPng}` },
+  ];
+  const docBuf = await generatePdfBuffer(
+    { ...session, notizen: 'Siehe angehängte Dokumente.', exportSelection: ['Notiz', 'Anhänge'] },
+    logoDataUrl,
+    docAttachments
+  );
+  const docOut = path.join(process.cwd(), 'test-documents.pdf');
+  fs.writeFileSync(docOut, docBuf);
+  console.log(`  ✓ Wrote ${docOut} (${docBuf.length} bytes)`);
 
   if (failures.length) {
     console.error('\n=== FAILURES ===');

@@ -5,6 +5,17 @@ export interface AttachmentImage {
   filename: string;
 }
 
+export interface TextAttachment {
+  text: string;
+  filename: string;
+}
+
+// An attachment rendered into the protocol: either an embedded image or a
+// text document (.txt / .md) converted to real, formatted body text.
+export type PdfAttachment =
+  | ({ kind: 'image' } & AttachmentImage)
+  | ({ kind: 'text' } & TextAttachment);
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfmakePrinter = require('pdfmake');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -583,49 +594,77 @@ function buildSection(title: string, text: string | null): any[] {
   ];
 }
 
+// Drop the extension so a filename reads like a document title, not a file.
+function documentTitle(filename: string): string {
+  const base = filename.replace(/\.[^.\\/]+$/, '').trim();
+  return stripUnsupported(base || filename);
+}
+
+// Render each attachment as its own titled document block. Images embed as
+// before; text files (.txt/.md) become real, formatted body text. No generic
+// "ANHÄNGE" label — each document carries its own filename as a heading.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildAttachmentsSection(images: AttachmentImage[]): any[] {
-  if (images.length === 0) return [];
+function buildDocumentsSection(attachments: PdfAttachment[]): any[] {
+  if (attachments.length === 0) return [];
 
-  // One image per row, full content width — effectively whole-page view.
-  const items = images.map((img) => ({
-    stack: [
-      {
-        image: img.dataUrl,
-        fit: [CONTENT_WIDTH, ATTACHMENT_MAX_HEIGHT],
-        alignment: 'center',
-      },
-      {
-        text: img.filename,
-        fontSize: 8,
-        color: GRAY,
-        alignment: 'center',
-        margin: [0, 6, 0, 0],
-      },
-    ],
-    unbreakable: true,
-    margin: [0, 0, 0, 18],
-  }));
+  const cardLayout = {
+    hLineWidth: () => 1,
+    vLineWidth: () => 1,
+    hLineColor: () => BORDER,
+    vLineColor: () => BORDER,
+    paddingLeft: () => 12,
+    paddingRight: () => 12,
+    paddingTop: () => 12,
+    paddingBottom: () => 12,
+  };
 
-  return [
-    {
-      columns: [
+  return attachments.map((att) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let body: any;
+    if (att.kind === 'image') {
+      body = {
+        image: att.dataUrl,
+        // −24 leaves room for the card's left/right padding.
+        fit: [CONTENT_WIDTH - 24, ATTACHMENT_MAX_HEIGHT],
+        alignment: 'center',
+      };
+    } else {
+      const blocks = parseBlocks(att.text);
+      const items = blocks.length
+        ? blocks.map(blockToContent)
+        : [{ text: '–', fontSize: BODY_FONT_SIZE, color: GRAY }];
+      body = { stack: items };
+    }
+
+    return {
+      stack: [
         {
-          canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 12, r: 1.5, color: FL_GREEN }],
-          width: 11,
+          columns: [
+            {
+              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 14, r: 1.5, color: FL_GREEN }],
+              width: 11,
+            },
+            { text: documentTitle(att.filename), fontSize: 11, bold: true, color: DARK },
+          ],
+          margin: [0, 0, 0, 8],
         },
-        { text: 'ANHÄNGE', fontSize: 9, bold: true, color: FL_GREEN },
+        {
+          table: { widths: ['*'], body: [[{ stack: [body] }]] },
+          layout: cardLayout,
+        },
       ],
-      margin: [0, 0, 0, 10],
-    },
-    ...items,
-  ];
+      // Keep an image glued to its title (it fits on one page). Text docs may
+      // run long, so they must stay breakable across pages.
+      unbreakable: att.kind === 'image',
+      margin: [0, 0, 0, 18],
+    };
+  });
 }
 
 export async function generatePdfBuffer(
   session: SessionRecord,
   logoDataUrl: string,
-  attachmentImages: AttachmentImage[] = []
+  attachments: PdfAttachment[] = []
 ): Promise<Buffer> {
   const sessionDate = formatDate(session.datum);
   const sel = session.exportSelection;
@@ -651,7 +690,7 @@ export async function generatePdfBuffer(
       : []),
     ...(showRoutinen ? buildSection('ROUTINEN', session.routinen) : []),
     ...(showAffirmationen ? buildSection('AFFIRMATIONEN', session.affirmationen) : []),
-    ...(showAnhänge ? buildAttachmentsSection(attachmentImages) : []),
+    ...(showAnhänge ? buildDocumentsSection(attachments) : []),
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
