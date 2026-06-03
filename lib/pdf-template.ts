@@ -565,12 +565,12 @@ function buildSection(title: string, text: string | null): any[] {
         {
           columns: [
             {
-              // Bar vertically centered in the title's line box
-              // (fontSize 9 × lineHeight 1.35 ≈ 12.1pt → 8pt bar centered).
-              canvas: [{ type: 'rect', x: 0, y: 2, w: 3, h: 8, r: 1.5, color: FL_GREEN }],
+              // Full-height bar; the title text is nudged down so its glyphs
+              // sit centered against the bar (columns rows are top-aligned).
+              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 12, r: 1.5, color: FL_GREEN }],
               width: 11,
             },
-            { text: title, fontSize: 9, bold: true, color: FL_GREEN, lineHeight: 1.35 },
+            { text: title, fontSize: 9, bold: true, color: FL_GREEN, margin: [0, 2, 0, 0] },
           ],
           margin: [0, 0, 0, 8],
         },
@@ -643,12 +643,11 @@ function buildDocumentsSection(attachments: PdfAttachment[]): any[] {
         {
           columns: [
             {
-              // Bar vertically centered in the title's line box
-              // (fontSize 11 × lineHeight 1.35 ≈ 14.9pt → 10pt bar centered).
-              canvas: [{ type: 'rect', x: 0, y: 2.5, w: 3, h: 10, r: 1.5, color: FL_GREEN }],
+              // Full-height bar; title text nudged down to center against it.
+              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 14, r: 1.5, color: FL_GREEN }],
               width: 11,
             },
-            { text: documentTitle(att.filename), fontSize: 11, bold: true, color: DARK, lineHeight: 1.35 },
+            { text: documentTitle(att.filename), fontSize: 11, bold: true, color: DARK, margin: [0, 2, 0, 0] },
           ],
           margin: [0, 0, 0, 8],
         },
