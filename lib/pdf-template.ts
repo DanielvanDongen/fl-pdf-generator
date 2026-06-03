@@ -565,10 +565,12 @@ function buildSection(title: string, text: string | null): any[] {
         {
           columns: [
             {
-              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 12, r: 1.5, color: FL_GREEN }],
+              // Bar vertically centered in the title's line box
+              // (fontSize 9 × lineHeight 1.35 ≈ 12.1pt → 8pt bar centered).
+              canvas: [{ type: 'rect', x: 0, y: 2, w: 3, h: 8, r: 1.5, color: FL_GREEN }],
               width: 11,
             },
-            { text: title, fontSize: 9, bold: true, color: FL_GREEN },
+            { text: title, fontSize: 9, bold: true, color: FL_GREEN, lineHeight: 1.35 },
           ],
           margin: [0, 0, 0, 8],
         },
@@ -641,10 +643,12 @@ function buildDocumentsSection(attachments: PdfAttachment[]): any[] {
         {
           columns: [
             {
-              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 14, r: 1.5, color: FL_GREEN }],
+              // Bar vertically centered in the title's line box
+              // (fontSize 11 × lineHeight 1.35 ≈ 14.9pt → 10pt bar centered).
+              canvas: [{ type: 'rect', x: 0, y: 2.5, w: 3, h: 10, r: 1.5, color: FL_GREEN }],
               width: 11,
             },
-            { text: documentTitle(att.filename), fontSize: 11, bold: true, color: DARK },
+            { text: documentTitle(att.filename), fontSize: 11, bold: true, color: DARK, lineHeight: 1.35 },
           ],
           margin: [0, 0, 0, 8],
         },
