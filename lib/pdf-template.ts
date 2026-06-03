@@ -76,6 +76,15 @@ function findNextMarker(
   // ***triple*** is treated as bold+italic via nested re-parse.
   const patterns: Array<{ re: RegExp; build: (m: RegExpExecArray) => { inner: string; style: InlineStyle; rawLen: number } }> = [
     {
+      // Backslash escape: `\*`, `\_`, `\#`, … → literal char, never a marker.
+      // Airtable emits these when a coach pastes markdown it can't apply as
+      // real formatting (e.g. ** spanning a heading→paragraph boundary).
+      // Must run first so the escaped punctuation is consumed before any
+      // emphasis pattern can mistake it for a marker.
+      re: /\\([\\`*_{}\[\]()#+\-.!>~|])/g,
+      build: (m) => ({ inner: '', style: {}, rawLen: m[0].length }),
+    },
+    {
       re: /\*\*\*([^\n]+?)\*\*\*/g,
       build: (m) => ({ inner: `*${m[1]}*`, style: { bold: true }, rawLen: m[0].length }),
     },
@@ -135,7 +144,10 @@ function findNextMarker(
     // Determine inner content (for terminal markers like code/link, capture literal text)
     let inner = built.inner;
     let terminalText: string | undefined;
-    if (re.source.startsWith('`')) {
+    if (re.source.startsWith('\\\\')) {
+      terminalText = m[1]; // backslash escape - the escaped char, emitted literally
+      inner = '';
+    } else if (re.source.startsWith('`')) {
       terminalText = m[1]; // code content - literal
       inner = '';
     } else if (re.source.startsWith('\\[')) {

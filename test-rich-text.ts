@@ -78,6 +78,34 @@ console.log('Inline parser:');
   assert(r.some((x) => x.bold && !x.italics && x.text.includes(' end')), 'bold suffix preserved');
 }
 
+// ------------- Backslash escape handling (Airtable emits these) -------------
+function joined(runs: Run[]): string {
+  return runs.map((r) => r.text).join('');
+}
+{
+  // Airtable escapes ** as \*\* when bold can't be applied (e.g. crosses a block).
+  // Expect: clean literal asterisks, no stray backslashes, no misfired emphasis.
+  const r = parseInline('\\*\\*Er braucht keinen Trick\\*\\*') as Run[];
+  assert(joined(r) === '**Er braucht keinen Trick**', 'escaped \\*\\* → literal ** (no backslashes)');
+  assert(!r.some((x) => x.bold), 'escaped \\*\\* is NOT bold');
+  assert(!r.some((x) => x.italics), 'escaped \\*\\* is NOT italic');
+}
+{
+  const r = parseInline('Preis 5\\* besser als \\_alt\\_') as Run[];
+  assert(joined(r) === 'Preis 5* besser als _alt_', 'escaped \\* and \\_ → literal chars');
+  assert(!r.some((x) => x.italics), 'escaped \\_ is NOT italic');
+}
+{
+  // A real escape must not block genuine bold elsewhere in the same line.
+  const r = parseInline('literal \\* and **echt fett**') as Run[];
+  assert(runHasBold(r, 'echt fett'), 'genuine bold still works alongside an escape');
+  assert(joined(r).includes('literal * and'), 'escaped \\* rendered literal before real bold');
+}
+{
+  const r = parseInline('Pfad C:\\\\temp\\\\datei') as Run[];
+  assert(joined(r) === 'Pfad C:\\temp\\datei', 'escaped backslash \\\\ → single literal backslash');
+}
+
 // ------------- Block parser unit checks -------------
 console.log('\nBlock parser:');
 {
