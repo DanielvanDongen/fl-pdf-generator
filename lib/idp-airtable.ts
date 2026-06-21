@@ -330,9 +330,13 @@ export async function writeAuftragContent(
   return merged;
 }
 
-// Resolves the Scouting-Auftrag for a 1:1 session: session → player → the player's
-// linked Scouting-Aufträge. Prefers an open order (Stage not Erledigt/Abgebrochen);
-// falls back to the most recently linked one. Returns null if none found.
+// Resolves the Scouting-Auftrag for a 1:1 session.
+//   1) Prefer the session's OWN direct Scouting-Auftrag link — authoritative: avoids
+//      guessing when the player has several open orders, and keeps re-runs idempotent
+//      (the first run sets this link, every later run follows it).
+//   2) Otherwise fall back via session → player → the player's linked Scouting-Aufträge.
+// In both cases prefer an open order (Stage not Erledigt/Abgebrochen), else the most
+// recently linked one. Returns null if nothing is linked.
 export async function resolveAuftragFromSession(sessionId: string): Promise<string | null> {
   const get = async (table: string, id: string): Promise<Record<string, unknown>> => {
     const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${table}/${id}`, {
@@ -343,20 +347,30 @@ export async function resolveAuftragFromSession(sessionId: string): Promise<stri
     return (await res.json()).fields ?? {};
   };
 
+  // From a list of Auftrag ids: prefer an open one, else the most recently linked.
+  const pickBest = async (ids: string[]): Promise<string | null> => {
+    if (ids.length === 0) return null;
+    const openIds: string[] = [];
+    for (const id of ids) {
+      const a = await get(AUFTRAEGE_TABLE, id);
+      const stage = a['Stage'];
+      if (stage !== 'Erledigt' && stage !== 'Abgebrochen') openIds.push(id);
+    }
+    const pool = openIds.length ? openIds : ids;
+    return pool[pool.length - 1] ?? null;
+  };
+
   const session = await get(SESSIONS_TABLE, sessionId);
+
+  // 1) Direct session → Auftrag link wins.
+  const directIds = (session['Scouting-Aufträge'] as string[] | undefined) ?? [];
+  const direct = await pickBest(directIds);
+  if (direct) return direct;
+
+  // 2) Fall back via the player's Scouting-Aufträge.
   const spielerId = (session['Spieler'] as string[] | undefined)?.[0];
   if (!spielerId) return null;
-
   const spieler = await get(SPIELER_TABLE, spielerId);
   const auftragIds = (spieler['Scouting-Aufträge'] as string[] | undefined) ?? [];
-  if (auftragIds.length === 0) return null;
-
-  const openIds: string[] = [];
-  for (const id of auftragIds) {
-    const a = await get(AUFTRAEGE_TABLE, id);
-    const stage = a['Stage'];
-    if (stage !== 'Erledigt' && stage !== 'Abgebrochen') openIds.push(id);
-  }
-  const pick = openIds.length ? openIds : auftragIds;
-  return pick[pick.length - 1] ?? null;
+  return pickBest(auftragIds);
 }
