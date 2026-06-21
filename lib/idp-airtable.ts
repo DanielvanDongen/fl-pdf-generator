@@ -9,6 +9,19 @@ const SPIELER_TABLE = 'tblVoY7jSljHw8Dkf';
 const ANHAENGE_FIELD = 'fldstRa8ZE9ljAl2y'; // 1:1 Sessions → Anhänge (multipleAttachments)
 const AUFTRAEGE_TABLE = 'tblma9xZ6o8RvqEMC'; // Scouting-Aufträge
 const AUFTRAG_IDP_PDF_FIELD = 'fldLrDrKB8gVnBUYL'; // Scouting-Aufträge → IDP-PDF (multipleAttachments)
+// Scouting-Aufträge content fields (written by the automatic transcript→IDP flow).
+const AUFTRAG_FIELDS = {
+  spiele: 'fldRvMhhpY1Lelvin', // Beobachtete Spiele
+  physisS: 'fldemIzB8m6GGj60b',
+  physisE: 'fldii0haPTDXfeXt0',
+  technikS: 'flduyt2GX7nW7pQQZ',
+  technikE: 'fldHZTwl6fprNcMaU',
+  taktikS: 'fldqlzaegkOL00Qn9',
+  taktikE: 'fldMUrSxpuJY3AzTX',
+  mentalS: 'fld9zG55bLYFyBlJs',
+  mentalE: 'fldEItGdVEuEYPysj',
+  session: 'fldl1w5LiccerDXlb', // Verknüpfte 1:1 Session
+} as const;
 
 export const SCOUTING_SESSION_TYP = 'Scouting Analyse';
 
@@ -203,4 +216,38 @@ export async function uploadIdpToAuftrag(
     throw new Error(`IDP-PDF clear failed: ${clear.status} ${await clear.text()}`);
   }
   await uploadAttachmentToField(recordId, AUFTRAG_IDP_PDF_FIELD, pdf, filename);
+}
+
+// Writes the 4-Säulen content (and observed games) into the Auftrag's editable
+// fields, joining each bullet list into a newline-separated text field. Optionally
+// links the source 1:1 session. Used by the automatic transcript→IDP flow.
+export async function writeAuftragContent(
+  recordId: string,
+  pillars: AuftragPillars,
+  sessionId?: string
+): Promise<void> {
+  const j = (arr: string[]): string => (arr ?? []).join('\n');
+  const fields: Record<string, unknown> = {
+    [AUFTRAG_FIELDS.spiele]: j(pillars.spiele),
+    [AUFTRAG_FIELDS.physisS]: j(pillars.physis.staerken),
+    [AUFTRAG_FIELDS.physisE]: j(pillars.physis.entwicklung),
+    [AUFTRAG_FIELDS.technikS]: j(pillars.technik.staerken),
+    [AUFTRAG_FIELDS.technikE]: j(pillars.technik.entwicklung),
+    [AUFTRAG_FIELDS.taktikS]: j(pillars.taktik.staerken),
+    [AUFTRAG_FIELDS.taktikE]: j(pillars.taktik.entwicklung),
+    [AUFTRAG_FIELDS.mentalS]: j(pillars.mental.staerken),
+    [AUFTRAG_FIELDS.mentalE]: j(pillars.mental.entwicklung),
+  };
+  if (sessionId && /^rec[A-Za-z0-9]{14}$/.test(sessionId)) {
+    fields[AUFTRAG_FIELDS.session] = [{ id: sessionId }];
+  }
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) {
+    throw new Error(`Auftrag content write failed: ${res.status} ${await res.text()}`);
+  }
 }

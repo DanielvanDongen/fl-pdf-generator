@@ -12,6 +12,7 @@ import {
 import {
   fetchScoutingSession,
   fetchScoutingAuftrag,
+  writeAuftragContent,
   uploadIdpAttachment,
   uploadIdpToAuftrag,
   SCOUTING_SESSION_TYP,
@@ -113,7 +114,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Auftrag not found' }, { status: 404 });
     }
 
-    const data = buildIdpData(auftrag.player, auftrag.pillars, body);
+    // Two modes:
+    //  - Payload carries pillar content (automatic transcript flow): write it into
+    //    the editable Auftrag fields (+ optional session link), then render from it.
+    //  - No payload content (manual "IDP generieren" button): render from the
+    //    fields already on the Auftrag.
+    const hasPayloadContent =
+      body.physis || body.technik || body.taktik || body.mental || body.spiele;
+
+    let pillars: PillarBundle;
+    if (hasPayloadContent) {
+      pillars = {
+        spiele: asStringArray(body.spiele),
+        physis: asPillar(body.physis),
+        technik: asPillar(body.technik),
+        taktik: asPillar(body.taktik),
+        mental: asPillar(body.mental),
+      };
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
+      try {
+        await writeAuftragContent(auftragId, pillars, sessionId);
+      } catch (err) {
+        console.error('Auftrag content write error:', err);
+        return NextResponse.json({ error: 'Auftrag-Felder schreiben fehlgeschlagen' }, { status: 500 });
+      }
+    } else {
+      pillars = auftrag.pillars;
+    }
+
+    const data = buildIdpData(auftrag.player, pillars, body);
 
     let pdf: Buffer;
     try {
@@ -131,7 +160,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Upload nach Airtable fehlgeschlagen' }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, source: 'auftrag', filename, bytes: pdf.length });
+    return NextResponse.json({
+      ok: true,
+      source: hasPayloadContent ? 'auftrag+write' : 'auftrag',
+      filename,
+      bytes: pdf.length,
+    });
   }
 
   // ---- Session path (Legacy): recordId = 1:1-Session, Inhalt aus dem Payload ----
