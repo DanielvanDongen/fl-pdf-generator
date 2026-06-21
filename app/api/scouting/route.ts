@@ -150,7 +150,14 @@ export async function POST(req: NextRequest) {
 
     let pillars: PillarBundle;
     if (hasPayloadContent) {
-      pillars = {
+      // #2: an abgeschlossene/abgebrochene Aufträge nichts schreiben.
+      if (auftrag.stage === 'Erledigt' || auftrag.stage === 'Abgebrochen') {
+        return NextResponse.json(
+          { error: `Auftrag-Stage "${auftrag.stage}" — Inhalt wird nicht überschrieben` },
+          { status: 409 }
+        );
+      }
+      const incoming = {
         spiele: asStringArray(body.spiele),
         physis: asPillar(body.physis),
         technik: asPillar(body.technik),
@@ -158,7 +165,13 @@ export async function POST(req: NextRequest) {
         mental: asPillar(body.mental),
       };
       try {
-        await writeAuftragContent(auftragId, pillars, sessionId || undefined);
+        // #2: only-fill-empty merge — gibt die effektiven Felder fürs PDF zurück.
+        pillars = await writeAuftragContent(
+          auftragId,
+          incoming,
+          auftrag.pillars,
+          sessionId || undefined
+        );
       } catch (err) {
         console.error('Auftrag content write error:', err);
         return NextResponse.json({ error: 'Auftrag-Felder schreiben fehlgeschlagen' }, { status: 500 });

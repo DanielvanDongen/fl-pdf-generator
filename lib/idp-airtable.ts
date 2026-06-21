@@ -63,6 +63,7 @@ export interface ScoutingAuftrag {
   recordId: string;
   player: PlayerMeta;
   pillars: AuftragPillars;
+  stage: string;
 }
 
 function firstString(v: unknown): string {
@@ -146,6 +147,7 @@ export async function fetchScoutingAuftrag(recordId: string): Promise<ScoutingAu
   return {
     recordId: data.id,
     player,
+    stage: firstString(f['Stage']),
     pillars: {
       spiele: splitLines(f['Beobachtete Spiele']),
       physis: {
@@ -199,59 +201,133 @@ export async function uploadIdpAttachment(
   await uploadAttachmentToField(recordId, ANHAENGE_FIELD, pdf, filename);
 }
 
-// Auftrag flow: replace the IDP-PDF field so re-generation yields a single current PDF.
-// Clear first, then upload the fresh buffer (PDF is always re-derivable from the fields).
+// Auftrag flow: upload the fresh PDF FIRST, then drop the previous one (#3).
+// This never leaves the field empty — if the cleanup step fails, the field simply
+// keeps both old + new PDF (no data loss) instead of being momentarily blank.
 export async function uploadIdpToAuftrag(
   recordId: string,
   pdf: Buffer,
   filename: string
 ): Promise<void> {
-  const patchUrl = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
-  const clear = await fetch(patchUrl, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ fields: { [AUFTRAG_IDP_PDF_FIELD]: [] } }),
-  });
-  if (!clear.ok) {
-    throw new Error(`IDP-PDF clear failed: ${clear.status} ${await clear.text()}`);
+  const recUrl = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
+
+  // 1) Snapshot the attachment ids already present.
+  const beforeRes = await fetch(recUrl, { headers, cache: 'no-store' });
+  if (!beforeRes.ok) {
+    throw new Error(`IDP-PDF read failed: ${beforeRes.status} ${await beforeRes.text()}`);
   }
+  const beforeFields = (await beforeRes.json()).fields ?? {};
+  const oldIds: string[] = (
+    (beforeFields[AUFTRAG_IDP_PDF_FIELD] as Array<{ id: string }> | undefined) ?? []
+  ).map((a) => a.id);
+
+  // 2) Upload the fresh PDF (the content API appends to the field).
   await uploadAttachmentToField(recordId, AUFTRAG_IDP_PDF_FIELD, pdf, filename);
+
+  // 3) Best-effort cleanup: keep only the freshly added attachment(s), drop the old.
+  if (oldIds.length > 0) {
+    const afterRes = await fetch(recUrl, { headers, cache: 'no-store' });
+    if (!afterRes.ok) return; // PDF is in place; cleanup is non-critical.
+    const afterAtts =
+      ((await afterRes.json()).fields?.[AUFTRAG_IDP_PDF_FIELD] as
+        | Array<{ id: string }>
+        | undefined) ?? [];
+    const fresh = afterAtts.filter((a) => !oldIds.includes(a.id));
+    if (fresh.length > 0 && fresh.length < afterAtts.length) {
+      await fetch(recUrl, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          fields: { [AUFTRAG_IDP_PDF_FIELD]: fresh.map((a) => ({ id: a.id })) },
+        }),
+      });
+    }
+  }
 }
 
 // Writes the 4-Säulen content (and observed games) into the Auftrag's editable
-// fields, joining each bullet list into a newline-separated text field. Optionally
-// links the source 1:1 session. Used by the automatic transcript→IDP flow.
+// fields — but ONLY into fields that are currently empty (#2): a field already
+// holding text (e.g. a manual scout correction) is never overwritten. Always
+// (re)links the source 1:1 session. Returns the effective (merged) pillars so the
+// caller renders the PDF from what is actually stored on the Auftrag.
 export async function writeAuftragContent(
   recordId: string,
-  pillars: AuftragPillars,
+  incoming: AuftragPillars,
+  current: AuftragPillars,
   sessionId?: string
-): Promise<void> {
+): Promise<AuftragPillars> {
   const j = (arr: string[]): string => (arr ?? []).join('\n');
-  const fields: Record<string, unknown> = {
-    [AUFTRAG_FIELDS.spiele]: j(pillars.spiele),
-    [AUFTRAG_FIELDS.physisS]: j(pillars.physis.staerken),
-    [AUFTRAG_FIELDS.physisE]: j(pillars.physis.entwicklung),
-    [AUFTRAG_FIELDS.technikS]: j(pillars.technik.staerken),
-    [AUFTRAG_FIELDS.technikE]: j(pillars.technik.entwicklung),
-    [AUFTRAG_FIELDS.taktikS]: j(pillars.taktik.staerken),
-    [AUFTRAG_FIELDS.taktikE]: j(pillars.taktik.entwicklung),
-    [AUFTRAG_FIELDS.mentalS]: j(pillars.mental.staerken),
-    [AUFTRAG_FIELDS.mentalE]: j(pillars.mental.entwicklung),
+  const fields: Record<string, unknown> = {};
+
+  // Keep current value if the field already has content; otherwise fill from incoming
+  // and queue that field for the PATCH.
+  const resolve = (fieldId: string, cur: string[], inc: string[]): string[] => {
+    if (cur && cur.length > 0) return cur;
+    const val = inc ?? [];
+    fields[fieldId] = j(val);
+    return val;
   };
+
+  const merged: AuftragPillars = {
+    spiele: resolve(AUFTRAG_FIELDS.spiele, current.spiele, incoming.spiele),
+    physis: {
+      staerken: resolve(AUFTRAG_FIELDS.physisS, current.physis.staerken, incoming.physis.staerken),
+      entwicklung: resolve(
+        AUFTRAG_FIELDS.physisE,
+        current.physis.entwicklung,
+        incoming.physis.entwicklung
+      ),
+    },
+    technik: {
+      staerken: resolve(
+        AUFTRAG_FIELDS.technikS,
+        current.technik.staerken,
+        incoming.technik.staerken
+      ),
+      entwicklung: resolve(
+        AUFTRAG_FIELDS.technikE,
+        current.technik.entwicklung,
+        incoming.technik.entwicklung
+      ),
+    },
+    taktik: {
+      staerken: resolve(AUFTRAG_FIELDS.taktikS, current.taktik.staerken, incoming.taktik.staerken),
+      entwicklung: resolve(
+        AUFTRAG_FIELDS.taktikE,
+        current.taktik.entwicklung,
+        incoming.taktik.entwicklung
+      ),
+    },
+    mental: {
+      staerken: resolve(AUFTRAG_FIELDS.mentalS, current.mental.staerken, incoming.mental.staerken),
+      entwicklung: resolve(
+        AUFTRAG_FIELDS.mentalE,
+        current.mental.entwicklung,
+        incoming.mental.entwicklung
+      ),
+    },
+  };
+
   if (sessionId && /^rec[A-Za-z0-9]{14}$/.test(sessionId)) {
     // Airtable REST API expects an array of record-ID strings for link fields
     // (the {id} object form is the scripting API, not REST).
     fields[AUFTRAG_FIELDS.session] = [sessionId];
   }
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ fields }),
-  });
-  if (!res.ok) {
-    throw new Error(`Auftrag content write failed: ${res.status} ${await res.text()}`);
+
+  // Nothing empty to fill and no link to set → skip the write entirely.
+  if (Object.keys(fields).length > 0) {
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ fields }),
+    });
+    if (!res.ok) {
+      throw new Error(`Auftrag content write failed: ${res.status} ${await res.text()}`);
+    }
   }
+
+  return merged;
 }
 
 // Resolves the Scouting-Auftrag for a 1:1 session: session → player → the player's
