@@ -239,7 +239,9 @@ export async function writeAuftragContent(
     [AUFTRAG_FIELDS.mentalE]: j(pillars.mental.entwicklung),
   };
   if (sessionId && /^rec[A-Za-z0-9]{14}$/.test(sessionId)) {
-    fields[AUFTRAG_FIELDS.session] = [{ id: sessionId }];
+    // Airtable REST API expects an array of record-ID strings for link fields
+    // (the {id} object form is the scripting API, not REST).
+    fields[AUFTRAG_FIELDS.session] = [sessionId];
   }
   const url = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
   const res = await fetch(url, {
