@@ -7,6 +7,8 @@ const TOKEN = process.env.AIRTABLE_TOKEN!;
 const SESSIONS_TABLE = 'tblywrEl1cQbHNzrz'; // 1:1 Sessions
 const SPIELER_TABLE = 'tblVoY7jSljHw8Dkf';
 const ANHAENGE_FIELD = 'fldstRa8ZE9ljAl2y'; // 1:1 Sessions → Anhänge (multipleAttachments)
+const AUFTRAEGE_TABLE = 'tblma9xZ6o8RvqEMC'; // Scouting-Aufträge
+const AUFTRAG_IDP_PDF_FIELD = 'fldLrDrKB8gVnBUYL'; // Scouting-Aufträge → IDP-PDF (multipleAttachments)
 
 export const SCOUTING_SESSION_TYP = 'Scouting Analyse';
 
@@ -29,6 +31,25 @@ export interface ScoutingSession {
   sessionTyp: string;
   hasTranskript: boolean;
   player: PlayerMeta;
+}
+
+interface Pillar {
+  staerken: string[];
+  entwicklung: string[];
+}
+
+export interface AuftragPillars {
+  spiele: string[];
+  physis: Pillar;
+  technik: Pillar;
+  taktik: Pillar;
+  mental: Pillar;
+}
+
+export interface ScoutingAuftrag {
+  recordId: string;
+  player: PlayerMeta;
+  pillars: AuftragPillars;
 }
 
 function firstString(v: unknown): string {
@@ -84,14 +105,64 @@ export async function fetchScoutingSession(recordId: string): Promise<ScoutingSe
   };
 }
 
-// Uploads a PDF into the session's Anhänge field via the Airtable content API.
-// Note: appends (does not replace existing attachments).
-export async function uploadIdpAttachment(
+// Splits a multiline text field into trimmed, non-empty bullet lines.
+// Strips a leading bullet/dash so coaches can write "• …" or "- …" freely.
+function splitLines(v: unknown): string[] {
+  if (typeof v !== 'string') return [];
+  return v
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[\s••\-*]+/, '').trim())
+    .filter((l) => l.length > 0);
+}
+
+// Reads the 4-Säulen IDP content directly from a Scouting-Auftrag record
+// (Option 1: content lives on the order, not the session).
+export async function fetchScoutingAuftrag(recordId: string): Promise<ScoutingAuftrag> {
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
+  const res = await fetch(url, { headers, cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`Auftrag fetch failed: ${res.status} ${await res.text()}`);
+  }
+  const data = await res.json();
+  const f = data.fields ?? {};
+  const spielerId = (f['Spieler'] as string[] | undefined)?.[0] ?? null;
+  const player = spielerId
+    ? await fetchSpieler(spielerId)
+    : { name: '', vorname: '', nachname: '', position: '', geburtsdatum: '', liga: '' };
+
+  return {
+    recordId: data.id,
+    player,
+    pillars: {
+      spiele: splitLines(f['Beobachtete Spiele']),
+      physis: {
+        staerken: splitLines(f['Physis - Stärken']),
+        entwicklung: splitLines(f['Physis - Entwicklungsfelder']),
+      },
+      technik: {
+        staerken: splitLines(f['Technik - Stärken']),
+        entwicklung: splitLines(f['Technik - Entwicklungsfelder']),
+      },
+      taktik: {
+        staerken: splitLines(f['Taktik - Stärken']),
+        entwicklung: splitLines(f['Taktik - Entwicklungsfelder']),
+      },
+      mental: {
+        staerken: splitLines(f['Mental - Stärken']),
+        entwicklung: splitLines(f['Mental - Entwicklungsfelder']),
+      },
+    },
+  };
+}
+
+// Appends a PDF into an attachment field via the Airtable content API.
+async function uploadAttachmentToField(
   recordId: string,
+  fieldId: string,
   pdf: Buffer,
   filename: string
 ): Promise<void> {
-  const endpoint = `https://content.airtable.com/v0/${BASE_ID}/${recordId}/${ANHAENGE_FIELD}/uploadAttachment`;
+  const endpoint = `https://content.airtable.com/v0/${BASE_ID}/${recordId}/${fieldId}/uploadAttachment`;
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
@@ -104,4 +175,32 @@ export async function uploadIdpAttachment(
   if (!res.ok) {
     throw new Error(`Attachment upload failed: ${res.status} ${await res.text()}`);
   }
+}
+
+// Session flow: append the IDP into the session's Anhänge field (does not replace).
+export async function uploadIdpAttachment(
+  recordId: string,
+  pdf: Buffer,
+  filename: string
+): Promise<void> {
+  await uploadAttachmentToField(recordId, ANHAENGE_FIELD, pdf, filename);
+}
+
+// Auftrag flow: replace the IDP-PDF field so re-generation yields a single current PDF.
+// Clear first, then upload the fresh buffer (PDF is always re-derivable from the fields).
+export async function uploadIdpToAuftrag(
+  recordId: string,
+  pdf: Buffer,
+  filename: string
+): Promise<void> {
+  const patchUrl = `https://api.airtable.com/v0/${BASE_ID}/${AUFTRAEGE_TABLE}/${recordId}`;
+  const clear = await fetch(patchUrl, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ fields: { [AUFTRAG_IDP_PDF_FIELD]: [] } }),
+  });
+  if (!clear.ok) {
+    throw new Error(`IDP-PDF clear failed: ${clear.status} ${await clear.text()}`);
+  }
+  await uploadAttachmentToField(recordId, AUFTRAG_IDP_PDF_FIELD, pdf, filename);
 }

@@ -11,8 +11,11 @@ import {
 } from '@/lib/idp-template';
 import {
   fetchScoutingSession,
+  fetchScoutingAuftrag,
   uploadIdpAttachment,
+  uploadIdpToAuftrag,
   SCOUTING_SESSION_TYP,
+  type PlayerMeta,
 } from '@/lib/idp-airtable';
 
 export const runtime = 'nodejs';
@@ -57,6 +60,29 @@ function sanitizeFilenamePart(s: string): string {
   return s.replace(/[^A-Za-z0-9äöüÄÖÜß_-]/g, '_').slice(0, 60);
 }
 
+type PillarBundle = Pick<IdpData, 'spiele' | 'physis' | 'technik' | 'taktik' | 'mental'>;
+
+// Merges player meta (with optional payload overrides) and pillar content into IdpData.
+function buildIdpData(m: PlayerMeta, content: PillarBundle, body: Record<string, unknown>): IdpData {
+  const override = (key: string, fallback: string): string => {
+    const v = body[key];
+    return typeof v === 'string' && v.trim() ? v : fallback;
+  };
+  return {
+    name: override('name', m.name),
+    position: override('position', m.position),
+    geburtsdatum: override('geburtsdatum', m.geburtsdatum),
+    liga: override('liga', m.liga),
+    ...content,
+  };
+}
+
+function idpFilename(m: PlayerMeta): string {
+  const nachname = sanitizeFilenamePart((m.nachname || m.name).toUpperCase());
+  const vorname = sanitizeFilenamePart(m.vorname);
+  return `IDP_${[nachname, vorname].filter(Boolean).join('-') || 'Scouting'}.pdf`;
+}
+
 export async function POST(req: NextRequest) {
   // 1) Auth (same shared secret as the session webhook)
   const provided = req.headers.get('x-webhook-secret') ?? '';
@@ -74,12 +100,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const recordId = body?.recordId;
-  if (typeof recordId !== 'string' || !/^rec[A-Za-z0-9]{14}$/.test(recordId)) {
-    return NextResponse.json({ error: 'Invalid recordId' }, { status: 400 });
+  const REC_RE = /^rec[A-Za-z0-9]{14}$/;
+
+  // ---- Auftrag path: 4-Säulen-Inhalt lebt am Scouting-Auftrag (Option 1) ----
+  const auftragId = typeof body?.auftragId === 'string' ? body.auftragId : '';
+  if (REC_RE.test(auftragId)) {
+    let auftrag;
+    try {
+      auftrag = await fetchScoutingAuftrag(auftragId);
+    } catch (err) {
+      console.error('Scouting Auftrag fetch error:', err);
+      return NextResponse.json({ error: 'Auftrag not found' }, { status: 404 });
+    }
+
+    const data = buildIdpData(auftrag.player, auftrag.pillars, body);
+
+    let pdf: Buffer;
+    try {
+      pdf = await generateIdpBuffer(data, loadAssets());
+    } catch (err) {
+      console.error('IDP generation error:', err instanceof Error ? err.stack : err);
+      return NextResponse.json({ error: 'PDF-Generierung fehlgeschlagen' }, { status: 500 });
+    }
+
+    const filename = idpFilename(auftrag.player);
+    try {
+      await uploadIdpToAuftrag(auftragId, pdf, filename);
+    } catch (err) {
+      console.error('IDP attachment upload error (Auftrag):', err);
+      return NextResponse.json({ error: 'Upload nach Airtable fehlgeschlagen' }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, source: 'auftrag', filename, bytes: pdf.length });
   }
 
-  // 3) Fetch session + player meta; guard session type
+  // ---- Session path (Legacy): recordId = 1:1-Session, Inhalt aus dem Payload ----
+  const recordId = body?.recordId;
+  if (typeof recordId !== 'string' || !REC_RE.test(recordId)) {
+    return NextResponse.json({ error: 'Invalid recordId (oder auftragId)' }, { status: 400 });
+  }
+
   let session;
   try {
     session = await fetchScoutingSession(recordId);
@@ -94,24 +154,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4) Build IDP data: Airtable meta + optional payload overrides + pillar content from payload
-  const m = session.player;
-  const data: IdpData = {
-    name: typeof body.name === 'string' && body.name.trim() ? body.name : m.name,
-    position: typeof body.position === 'string' && body.position.trim() ? body.position : m.position,
-    geburtsdatum:
-      typeof body.geburtsdatum === 'string' && body.geburtsdatum.trim()
-        ? body.geburtsdatum
-        : m.geburtsdatum,
-    liga: typeof body.liga === 'string' && body.liga.trim() ? body.liga : m.liga,
-    spiele: asStringArray(body.spiele),
-    physis: asPillar(body.physis),
-    technik: asPillar(body.technik),
-    taktik: asPillar(body.taktik),
-    mental: asPillar(body.mental),
-  };
+  const data = buildIdpData(
+    session.player,
+    {
+      spiele: asStringArray(body.spiele),
+      physis: asPillar(body.physis),
+      technik: asPillar(body.technik),
+      taktik: asPillar(body.taktik),
+      mental: asPillar(body.mental),
+    },
+    body
+  );
 
-  // 5) Render PDF
   let pdf: Buffer;
   try {
     pdf = await generateIdpBuffer(data, loadAssets());
@@ -120,10 +174,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'PDF-Generierung fehlgeschlagen' }, { status: 500 });
   }
 
-  // 6) Upload to Anhänge
-  const nachname = sanitizeFilenamePart((m.nachname || m.name).toUpperCase());
-  const vorname = sanitizeFilenamePart(m.vorname);
-  const filename = `IDP_${[nachname, vorname].filter(Boolean).join('-') || 'Scouting'}.pdf`;
+  const filename = idpFilename(session.player);
   try {
     await uploadIdpAttachment(recordId, pdf, filename);
   } catch (err) {
