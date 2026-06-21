@@ -12,6 +12,7 @@ import {
 import {
   fetchScoutingSession,
   fetchScoutingAuftrag,
+  resolveAuftragFromSession,
   writeAuftragContent,
   uploadIdpAttachment,
   uploadIdpToAuftrag,
@@ -103,9 +104,34 @@ export async function POST(req: NextRequest) {
 
   const REC_RE = /^rec[A-Za-z0-9]{14}$/;
 
+  // sessionId: the source 1:1 session (automatic transcript flow) — used to
+  // resolve and link the Auftrag.
+  const sessionId =
+    typeof body?.sessionId === 'string' && REC_RE.test(body.sessionId) ? body.sessionId : '';
+
   // ---- Auftrag path: 4-Säulen-Inhalt lebt am Scouting-Auftrag (Option 1) ----
-  const auftragId = typeof body?.auftragId === 'string' ? body.auftragId : '';
-  if (REC_RE.test(auftragId)) {
+  let auftragId =
+    typeof body?.auftragId === 'string' && REC_RE.test(body.auftragId) ? body.auftragId : '';
+
+  // Automatic flow: no explicit auftragId, but a source session → resolve the
+  // player's (open) Scouting-Auftrag from it.
+  if (!auftragId && sessionId) {
+    try {
+      const resolved = await resolveAuftragFromSession(sessionId);
+      if (!resolved) {
+        return NextResponse.json(
+          { error: 'Kein Scouting-Auftrag für diese Session gefunden' },
+          { status: 404 }
+        );
+      }
+      auftragId = resolved;
+    } catch (err) {
+      console.error('resolveAuftragFromSession error:', err);
+      return NextResponse.json({ error: 'Auftrag-Auflösung fehlgeschlagen' }, { status: 500 });
+    }
+  }
+
+  if (auftragId) {
     let auftrag;
     try {
       auftrag = await fetchScoutingAuftrag(auftragId);
@@ -131,9 +157,8 @@ export async function POST(req: NextRequest) {
         taktik: asPillar(body.taktik),
         mental: asPillar(body.mental),
       };
-      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
       try {
-        await writeAuftragContent(auftragId, pillars, sessionId);
+        await writeAuftragContent(auftragId, pillars, sessionId || undefined);
       } catch (err) {
         console.error('Auftrag content write error:', err);
         return NextResponse.json({ error: 'Auftrag-Felder schreiben fehlgeschlagen' }, { status: 500 });

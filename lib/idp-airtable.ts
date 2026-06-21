@@ -251,3 +251,34 @@ export async function writeAuftragContent(
     throw new Error(`Auftrag content write failed: ${res.status} ${await res.text()}`);
   }
 }
+
+// Resolves the Scouting-Auftrag for a 1:1 session: session → player → the player's
+// linked Scouting-Aufträge. Prefers an open order (Stage not Erledigt/Abgebrochen);
+// falls back to the most recently linked one. Returns null if none found.
+export async function resolveAuftragFromSession(sessionId: string): Promise<string | null> {
+  const get = async (table: string, id: string): Promise<Record<string, unknown>> => {
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${table}/${id}`, {
+      headers,
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`${table} fetch failed: ${res.status} ${await res.text()}`);
+    return (await res.json()).fields ?? {};
+  };
+
+  const session = await get(SESSIONS_TABLE, sessionId);
+  const spielerId = (session['Spieler'] as string[] | undefined)?.[0];
+  if (!spielerId) return null;
+
+  const spieler = await get(SPIELER_TABLE, spielerId);
+  const auftragIds = (spieler['Scouting-Aufträge'] as string[] | undefined) ?? [];
+  if (auftragIds.length === 0) return null;
+
+  const openIds: string[] = [];
+  for (const id of auftragIds) {
+    const a = await get(AUFTRAEGE_TABLE, id);
+    const stage = a['Stage'];
+    if (stage !== 'Erledigt' && stage !== 'Abgebrochen') openIds.push(id);
+  }
+  const pick = openIds.length ? openIds : auftragIds;
+  return pick[pick.length - 1] ?? null;
+}
