@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3001",
+    "gen:architektur": "node scripts/gen-architektur.mjs",
+    "prebuild": "node scripts/gen-architektur.mjs",
     "build": "next build",
     "start": "next start"
   },

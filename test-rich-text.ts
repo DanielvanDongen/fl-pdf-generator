@@ -3,7 +3,7 @@ import type { SessionRecord } from './lib/airtable';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const { parseInline, parseBlocks } = __test;
+const { parseInline, parseBlocks, buildLinkSection } = __test;
 
 // ------------- Inline parser unit checks -------------
 type Run = { text: string; bold?: boolean; italics?: boolean; decoration?: string; link?: string; font?: string };
@@ -155,6 +155,19 @@ console.log('\nBlock parser:');
   assert(b[0].kind === 'ul' && (b[0] as any).items.length === 3, 'task list (3 items)');
 }
 
+// ------------- Video link section checks -------------
+console.log('\nVideo link section:');
+{
+  const s = buildLinkSection('VIDEO AUFZEICHNUNG', 'https://zoom.us/rec/share/x');
+  assert(s.length === 1, 'link section built when URL present');
+  const json = JSON.stringify(s);
+  assert(json.includes('"link":"https://zoom.us/rec/share/x"'), 'URL is a clickable link');
+}
+{
+  assert(buildLinkSection('VIDEO AUFZEICHNUNG', null).length === 0, 'no section when URL null');
+  assert(buildLinkSection('VIDEO AUFZEICHNUNG', '   ').length === 0, 'no section when URL blank');
+}
+
 // ------------- Generate sample PDF -------------
 console.log('\nGenerating sample PDF…');
 
@@ -166,6 +179,7 @@ const session: SessionRecord = {
   coachName: 'Test Coach',
   dauer: 60,
   medium: 'Zoom',
+  videoLink: 'https://zoom.us/rec/share/abc123XYZ_recording-link-example',
   notizen: `# Hauptthema heute
 
 **Wichtige** Punkte aus der Session:
@@ -282,6 +296,17 @@ Siehe \`config.json\` für Details.`,
   const docOut = path.join(process.cwd(), 'test-documents.pdf');
   fs.writeFileSync(docOut, docBuf);
   console.log(`  ✓ Wrote ${docOut} (${docBuf.length} bytes)`);
+
+  // Third PDF: opt-in video link only — confirms the section renders when
+  // 'Video-Link' is selected and that other sections are excluded.
+  const videoBuf = await generatePdfBuffer(
+    { ...session, exportSelection: ['Video-Link'] },
+    logoDataUrl,
+    []
+  );
+  const videoOut = path.join(process.cwd(), 'test-video-link.pdf');
+  fs.writeFileSync(videoOut, videoBuf);
+  console.log(`  ✓ Wrote ${videoOut} (${videoBuf.length} bytes)`);
 
   if (failures.length) {
     console.error('\n=== FAILURES ===');

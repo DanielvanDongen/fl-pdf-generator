@@ -1,0 +1,116 @@
+{
+  "generatedAt": "2026-06-15T12:23:28.462Z",
+  "service": {
+    "name": "fl-pdf-generator",
+    "version": "1.0.0",
+    "framework": "Next.js"
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/pdf",
+      "title": "Session-PDF ausliefern",
+      "trigger": "Browser-Download (signierter Link)",
+      "reads": [
+        {
+          "label": "Airtable",
+          "detail": "Session-Daten"
+        }
+      ],
+      "writes": [
+        {
+          "label": "Airtable",
+          "detail": "Session-Daten"
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Session-PDF",
+          "detail": "gerendert mit pdfmake"
+        }
+      ],
+      "security": [
+        {
+          "label": "JWT-Token",
+          "detail": "Download-Links signieren & pruefen"
+        }
+      ],
+      "libs": [
+        "token",
+        "airtable",
+        "pdf-template"
+      ],
+      "description": "prueft JWT-Token · liest Airtable · schreibt Airtable · erstellt Session-PDF"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scouting",
+      "title": "Scouting-PDF (IDP) erstellen",
+      "trigger": "Airtable Automation (Webhook, Secret-geschuetzt)",
+      "reads": [
+        {
+          "label": "Airtable",
+          "detail": "Scouting-Daten"
+        }
+      ],
+      "writes": [
+        {
+          "label": "Airtable",
+          "detail": "Scouting-Daten"
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Scouting-PDF (IDP)",
+          "detail": "gerendert mit pdfmake"
+        }
+      ],
+      "security": [],
+      "libs": [
+        "idp-template",
+        "idp-airtable"
+      ],
+      "description": "liest Airtable · schreibt Airtable · erstellt Scouting-PDF (IDP)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhook",
+      "title": "Download-Link erzeugen",
+      "trigger": "Airtable Automation (Webhook, Secret-geschuetzt)",
+      "reads": [
+        {
+          "label": "Airtable",
+          "detail": "Session-Daten"
+        }
+      ],
+      "writes": [
+        {
+          "label": "Airtable",
+          "detail": "Session-Daten"
+        }
+      ],
+      "outputs": [],
+      "security": [
+        {
+          "label": "JWT-Token",
+          "detail": "Download-Links signieren & pruefen"
+        }
+      ],
+      "libs": [
+        "token",
+        "airtable"
+      ],
+      "description": "prueft JWT-Token · liest Airtable · schreibt Airtable"
+    }
+  ],
+  "dataSources": [
+    "Airtable"
+  ],
+  "tech": [
+    "react-pdf",
+    "JWT (jose)",
+    "Next.js",
+    "pdfmake",
+    "React"
+  ]
+}

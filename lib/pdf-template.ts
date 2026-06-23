@@ -596,6 +596,60 @@ function buildSection(title: string, text: string | null): any[] {
   ];
 }
 
+// Render a single clickable URL inside the standard section card. Used for the
+// video recording link: the player taps it to open the session recording.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildLinkSection(title: string, url: string | null): any[] {
+  if (!url || !url.trim()) return [];
+  const clean = stripUnsupported(url.trim());
+  if (!clean) return [];
+
+  return [
+    {
+      stack: [
+        {
+          columns: [
+            {
+              canvas: [{ type: 'rect', x: 0, y: 1, w: 3, h: 12, r: 1.5, color: FL_GREEN }],
+              width: 11,
+            },
+            { text: title, fontSize: 9, bold: true, color: FL_GREEN, margin: [0, 3.5, 0, 0] },
+          ],
+          margin: [0, 0, 0, 8],
+        },
+        {
+          table: {
+            widths: ['*'],
+            body: [
+              [
+                {
+                  text: [
+                    { text: 'Aufzeichnung ansehen: ', bold: true, color: DARK },
+                    { text: clean, link: clean, color: LINK_BLUE, decoration: 'underline' },
+                  ],
+                  fontSize: BODY_FONT_SIZE,
+                  lineHeight: BODY_LINE_HEIGHT,
+                },
+              ],
+            ],
+          },
+          layout: {
+            hLineWidth: () => 1,
+            vLineWidth: () => 1,
+            hLineColor: () => BORDER,
+            vLineColor: () => BORDER,
+            paddingLeft: () => 12,
+            paddingRight: () => 12,
+            paddingTop: () => 12,
+            paddingBottom: () => 12,
+          },
+        },
+      ],
+      margin: [0, 0, 0, 18],
+    },
+  ];
+}
+
 // Drop the extension so a filename reads like a document title, not a file.
 function documentTitle(filename: string): string {
   const base = filename.replace(/\.[^.\\/]+$/, '').trim();
@@ -680,9 +734,11 @@ export async function generatePdfBuffer(
   const showRoutinen = showAll || sel.includes('Routinen');
   const showAffirmationen = showAll || sel.includes('Affirmation');
   const showAnhänge = showAll || sel.includes('Anhänge');
+  const showVideoLink = showAll || sel.includes('Video-Link');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sections: any[] = [
+    ...(showVideoLink ? buildLinkSection('VIDEO AUFZEICHNUNG', session.videoLink) : []),
     ...(showNotizen ? buildSection('SESSION NOTIZEN', session.notizen) : []),
     ...(showZusammenfassung
       ? buildSection('ZUSAMMENFASSUNG TRANSKRIPT', session.zusammenfassungTranskript)
@@ -849,4 +905,4 @@ export async function generatePdfBuffer(
 }
 
 // ---------- Test helpers (exported for local verification only) ----------
-export const __test = { parseInline, parseBlocks };
+export const __test = { parseInline, parseBlocks, buildLinkSection };

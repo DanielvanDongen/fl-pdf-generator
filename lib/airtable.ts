@@ -27,6 +27,7 @@ export interface SessionRecord {
   coachName: string;
   dauer: number | null;
   medium: string | null;
+  videoLink: string | null;
   notizen: string | null;
   aufgaben: string | null;
   aufgabenAbgeschlossen: string | null;
@@ -112,6 +113,7 @@ export async function fetchSession(recordId: string): Promise<SessionRecord> {
     coachName,
     dauer: f["Dauer (Minuten)"] ?? null,
     medium: f["Medium"] ?? null,
+    videoLink: f["Video Aufzeichnung Link"] ?? null,
     notizen: f["Notizen"] ?? null,
     // Read from the Spieler source fields (markdown-preserving), NOT the
     // session lookups (which strip rich-text formatting).
