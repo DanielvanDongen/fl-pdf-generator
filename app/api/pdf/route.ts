@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyDownloadToken } from '@/lib/token';
 import { fetchSession, consumeJti } from '@/lib/airtable';
 import { generatePdfBuffer, type PdfAttachment } from '@/lib/pdf-template';
+import { appendPdfAttachments, type PdfDocAttachment } from '@/lib/merge-pdf';
 import path from 'path';
 import fs from 'fs';
 
@@ -88,41 +89,64 @@ export async function GET(req: NextRequest) {
   const MAX_TEXT_CHARS = 200_000;
   const isTextAttachment = (type: string, filename: string) =>
     type.startsWith('text/') || /\.(txt|md|markdown)$/i.test(filename);
+  const isPdfAttachment = (type: string, filename: string) =>
+    type === 'application/pdf' || /\.pdf$/i.test(filename);
 
-  const attachments: PdfAttachment[] = shouldFetchAttachments && session.anhänge?.length
+  // Images + text docs go into the pdfmake template (rendered inline, in field
+  // order). PDFs can't be embedded by pdfmake, so they're collected separately
+  // and their pages are appended to the finished protocol via pdf-lib.
+  type Fetched =
+    | { channel: 'template'; value: PdfAttachment }
+    | { channel: 'pdf'; value: PdfDocAttachment };
+
+  const fetched: Fetched[] = shouldFetchAttachments && session.anhänge?.length
     ? (await Promise.all(
-        // Preserve the field order; render images and text docs interleaved.
         session.anhänge
           .filter((att) => isAllowedAttachmentUrl(att.url))
-          .map(async (att): Promise<PdfAttachment | null> => {
+          .map(async (att): Promise<Fetched | null> => {
             const isImage = att.type.startsWith('image/');
             const isText = !isImage && isTextAttachment(att.type, att.filename);
-            if (!isImage && !isText) return null; // skip PDFs, binaries, etc.
+            const isPdf = !isImage && !isText && isPdfAttachment(att.type, att.filename);
+            if (!isImage && !isText && !isPdf) return null; // skip other binaries
             try {
               const res = await fetch(att.url);
               if (!res.ok) return null;
               const buf = Buffer.from(await res.arrayBuffer());
               if (isImage) {
                 return {
-                  kind: 'image',
-                  dataUrl: `data:${att.type};base64,${buf.toString('base64')}`,
-                  filename: att.filename,
+                  channel: 'template',
+                  value: {
+                    kind: 'image',
+                    dataUrl: `data:${att.type};base64,${buf.toString('base64')}`,
+                    filename: att.filename,
+                  },
                 };
+              }
+              if (isPdf) {
+                return { channel: 'pdf', value: { bytes: buf, filename: att.filename } };
               }
               const full = buf.toString('utf-8');
               const text =
                 full.length > MAX_TEXT_CHARS ? full.slice(0, MAX_TEXT_CHARS) + '\n…' : full;
-              return { kind: 'text', text, filename: att.filename };
+              return { channel: 'template', value: { kind: 'text', text, filename: att.filename } };
             } catch {
               return null;
             }
           })
-      )).filter((r): r is PdfAttachment => r !== null)
+      )).filter((r): r is Fetched => r !== null)
     : [];
+
+  const attachments: PdfAttachment[] = fetched
+    .filter((f): f is Extract<Fetched, { channel: 'template' }> => f.channel === 'template')
+    .map((f) => f.value);
+  const pdfAttachments: PdfDocAttachment[] = fetched
+    .filter((f): f is Extract<Fetched, { channel: 'pdf' }> => f.channel === 'pdf')
+    .map((f) => f.value);
 
   let pdfArrayBuffer: ArrayBuffer;
   try {
-    const buf = await generatePdfBuffer(session, logoDataUrl, attachments);
+    let buf = await generatePdfBuffer(session, logoDataUrl, attachments);
+    buf = await appendPdfAttachments(buf, pdfAttachments);
     pdfArrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
   } catch (err) {
     console.error('PDF generation error:', err instanceof Error ? err.stack : err);
